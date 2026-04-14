@@ -74,6 +74,8 @@ def generate_battle_card(
                 if part.inline_data and part.inline_data.mime_type.startswith("image/"):
                     return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
 
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"Gemini API error for card {card_index}: {e}")
 

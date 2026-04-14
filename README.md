@@ -124,4 +124,3 @@ battle-cards-server/
 | `mode: single` | 1 | 6 | 同一画像から6パターン生成 |
 | `mode: multi` + `advertise: true` | 5 | 6 | 6枚目=広告画像 |
 | `mode: multi` + `advertise: false` | 6 | 6 | 全て撮影画像から生成 |
->>>>>>> 53a111f (feat: バトルカードメーカー サーバー初期実装)

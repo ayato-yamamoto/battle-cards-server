@@ -164,6 +164,8 @@ async def _run_generation(
     generated_dir = os.path.join(UPLOAD_DIR, "generated")
     os.makedirs(generated_dir, exist_ok=True)
 
+    generated_count = 0
+
     try:
         for card_idx in range(1, total_cards + 1):
             # Card 6 with advertise=True: use the uploaded ad image directly
@@ -185,6 +187,7 @@ async def _run_generation(
                             "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
                             (job_id, card_idx, out_path),
                         )
+                    generated_count += 1
 
                 progress = int(card_idx / total_cards * 100)
                 with get_db() as db:
@@ -229,17 +232,25 @@ async def _run_generation(
                         "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
                         (job_id, card_idx, out_path),
                     )
+                generated_count += 1
 
             progress = int(card_idx / total_cards * 100)
             with get_db() as db:
                 db.execute("UPDATE jobs SET progress = ? WHERE id = ?", (progress, job_id))
 
-        # Mark completed
-        with get_db() as db:
-            db.execute(
-                "UPDATE jobs SET status = 'completed', progress = 100, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (job_id,),
-            )
+        # Mark completed or failed based on generation results
+        if generated_count == 0:
+            with get_db() as db:
+                db.execute(
+                    "UPDATE jobs SET status = 'failed', progress = 100, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (job_id,),
+                )
+        else:
+            with get_db() as db:
+                db.execute(
+                    "UPDATE jobs SET status = 'completed', progress = 100, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (job_id,),
+                )
 
     except Exception as e:
         print(f"Generation error for job {job_id}: {e}")
