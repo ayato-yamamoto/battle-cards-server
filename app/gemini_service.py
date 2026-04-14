@@ -7,7 +7,7 @@ from google.genai import types
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME = "gemini-2.0-flash-exp"
+MODEL_NAME = "gemini-2.5-flash-preview-04-17"
 
 
 def get_client() -> genai.Client:
