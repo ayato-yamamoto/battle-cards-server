@@ -429,10 +429,10 @@ async def finalize(req: FinalizeRequest):
 
         finalized_count += 1
 
-    # Update job with name and location
+    # Update job with name, location, and mark as finalized to prevent re-entry
     with get_db() as db:
         db.execute(
-            "UPDATE jobs SET name = ?, location = ? WHERE id = ?",
+            "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
             (req.first_name, req.location, req.job_id),
         )
 
