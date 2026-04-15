@@ -150,6 +150,83 @@ async def generate(req: GenerateRequest):
     return {"job_id": job_id}
 
 
+async def _generate_single_card(
+    job_id: str,
+    card_idx: int,
+    total_cards: int,
+    name: str,
+    location: str,
+    advertise: bool,
+    mode: str,
+    uploads: list[tuple[int, str, str]],
+    generated_dir: str,
+) -> bool:
+    """Generate a single card. Returns True if successful."""
+    # Card 6 with advertise=True: use the uploaded ad image directly
+    if advertise and card_idx == 6:
+        ad_upload = None
+        for idx, fpath, mtype in uploads:
+            if idx == 6:
+                ad_upload = (fpath, mtype)
+                break
+
+        if ad_upload:
+            out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
+            with open(ad_upload[0], "rb") as src:
+                with open(out_path, "wb") as dst:
+                    dst.write(src.read())
+
+            with get_db() as db:
+                db.execute(
+                    "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
+                    (job_id, card_idx, out_path),
+                )
+            return True
+        return False
+
+    # Determine source image
+    if mode == "single":
+        source_path, source_mime = uploads[0][1], uploads[0][2]
+    else:
+        source_upload = None
+        for idx, fpath, mtype in uploads:
+            if idx == card_idx:
+                source_upload = (fpath, mtype)
+                break
+        if source_upload is None:
+            source_upload = (uploads[0][1], uploads[0][2])
+        source_path, source_mime = source_upload
+
+    with open(source_path, "rb") as f:
+        image_bytes = f.read()
+
+    # Generate via Gemini (run in thread to avoid blocking)
+    result_bytes = await asyncio.get_event_loop().run_in_executor(
+        None,
+        generate_battle_card,
+        image_bytes,
+        source_mime,
+        name,
+        location,
+        card_idx,
+        total_cards if not advertise else total_cards - 1,
+    )
+
+    if result_bytes:
+        out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
+        with open(out_path, "wb") as f:
+            f.write(result_bytes)
+
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
+                (job_id, card_idx, out_path),
+            )
+        return True
+
+    return False
+
+
 async def _run_generation(
     job_id: str,
     session_id: str,
@@ -159,84 +236,42 @@ async def _run_generation(
     mode: str,
     uploads: list[tuple[int, str, str]],
 ) -> None:
-    """Background task: generate 6 battle card images."""
+    """Background task: generate 6 battle card images concurrently."""
     total_cards = 6
     generated_dir = os.path.join(UPLOAD_DIR, "generated")
     os.makedirs(generated_dir, exist_ok=True)
 
-    generated_count = 0
-
     try:
+        # Launch all card generation tasks concurrently
+        tasks = []
         for card_idx in range(1, total_cards + 1):
-            # Card 6 with advertise=True: use the uploaded ad image directly
-            if advertise and card_idx == 6:
-                ad_upload = None
-                for idx, fpath, mtype in uploads:
-                    if idx == 6:
-                        ad_upload = (fpath, mtype)
-                        break
-
-                if ad_upload:
-                    out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
-                    with open(ad_upload[0], "rb") as src:
-                        with open(out_path, "wb") as dst:
-                            dst.write(src.read())
-
-                    with get_db() as db:
-                        db.execute(
-                            "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
-                            (job_id, card_idx, out_path),
-                        )
-                    generated_count += 1
-
-                progress = int(card_idx / total_cards * 100)
-                with get_db() as db:
-                    db.execute("UPDATE jobs SET progress = ? WHERE id = ?", (progress, job_id))
-                continue
-
-            # Determine source image
-            if mode == "single":
-                source_path, source_mime = uploads[0][1], uploads[0][2]
-            else:
-                source_upload = None
-                for idx, fpath, mtype in uploads:
-                    if idx == card_idx:
-                        source_upload = (fpath, mtype)
-                        break
-                if source_upload is None:
-                    source_upload = (uploads[0][1], uploads[0][2])
-                source_path, source_mime = source_upload
-
-            with open(source_path, "rb") as f:
-                image_bytes = f.read()
-
-            # Generate via Gemini (run in thread to avoid blocking)
-            result_bytes = await asyncio.get_event_loop().run_in_executor(
-                None,
-                generate_battle_card,
-                image_bytes,
-                source_mime,
-                name,
-                location,
-                card_idx,
-                total_cards if not advertise else total_cards - 1,
+            task = _generate_single_card(
+                job_id=job_id,
+                card_idx=card_idx,
+                total_cards=total_cards,
+                name=name,
+                location=location,
+                advertise=advertise,
+                mode=mode,
+                uploads=uploads,
+                generated_dir=generated_dir,
             )
+            tasks.append(task)
 
-            if result_bytes:
-                out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
-                with open(out_path, "wb") as f:
-                    f.write(result_bytes)
-
-                with get_db() as db:
-                    db.execute(
-                        "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
-                        (job_id, card_idx, out_path),
-                    )
-                generated_count += 1
-
-            progress = int(card_idx / total_cards * 100)
+        # Update progress as each card completes
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+            await coro
+            completed += 1
+            progress = int(completed / total_cards * 100)
             with get_db() as db:
                 db.execute("UPDATE jobs SET progress = ? WHERE id = ?", (progress, job_id))
+
+        # Count successful generations
+        with get_db() as db:
+            generated_count = db.execute(
+                "SELECT COUNT(*) FROM generated_images WHERE job_id = ?", (job_id,)
+            ).fetchone()[0]
 
         # Mark completed or failed based on generation results
         if generated_count == 0:

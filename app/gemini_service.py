@@ -1,5 +1,6 @@
 import base64
 import os
+import time
 from typing import Optional
 
 from google import genai
@@ -65,32 +66,51 @@ def generate_battle_card(
         f"- ステータス表示、名前表示は含まない\n"
     )
 
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[
-                types.Content(
-                    parts=[
-                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                        types.Part.from_text(text=prompt),
-                    ]
-                )
-            ],
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-            ),
-        )
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=[
+                    types.Content(
+                        parts=[
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                            types.Part.from_text(text=prompt),
+                        ]
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                ),
+            )
 
-        # Extract image from response
-        if response.candidates:
-            print(f"生成成功: カード {card_index} / {total_cards} - {name} at {location}")
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                    return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
+            # Extract image from response
+            if response.candidates:
+                print(f"生成成功: カード {card_index} / {total_cards} - {name} at {location}")
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                        return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
 
-    except RuntimeError:
-        raise
-    except Exception as e:
-        print(f"Gemini API error for card {card_index}: {e}")
+            # No image in response — treat as retryable
+            if attempt < max_attempts:
+                print(f"カード {card_index}: レスポンスに画像なし、リトライします (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+
+        except RuntimeError:
+            raise
+        except TypeError as e:
+            # Handles "'NoneType' object is not iterable" errors
+            if attempt < max_attempts:
+                print(f"カード {card_index}: TypeError ({e}), リトライします (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+            print(f"Gemini API error for card {card_index} (final attempt): {e}")
+        except Exception as e:
+            if attempt < max_attempts:
+                print(f"カード {card_index}: エラー ({e}), リトライします (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+            print(f"Gemini API error for card {card_index} (final attempt): {e}")
 
     return None
