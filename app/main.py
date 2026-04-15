@@ -390,54 +390,71 @@ async def finalize(req: FinalizeRequest):
                 detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {dict(job)['status']})",
             )
 
-    with get_db() as db:
-        images = db.execute(
-            "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
-            (req.job_id,),
-        ).fetchall()
+    try:
+        with get_db() as db:
+            images = db.execute(
+                "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
+                (req.job_id,),
+            ).fetchall()
 
-    if not images:
-        raise HTTPException(status_code=400, detail="生成された画像がありません")
+        if not images:
+            raise HTTPException(status_code=400, detail="生成された画像がありません")
 
-    # Apply text overlay to each generated image
-    finalized_count = 0
-    for img_row in images:
-        img_dict = dict(img_row)
-        card_idx = img_dict["idx"]
-        filepath = img_dict["file_path"]
+        # Apply text overlay to each generated image
+        finalized_count = 0
+        for img_row in images:
+            img_dict = dict(img_row)
+            card_idx = img_dict["idx"]
+            filepath = img_dict["file_path"]
 
-        if not os.path.exists(filepath):
-            continue
+            if not os.path.exists(filepath):
+                continue
 
-        # Generate battle card name from naming logic
-        card_name = generate_card_name(req.first_name, card_idx)
+            # Generate battle card name from naming logic
+            card_name = generate_card_name(req.first_name, card_idx)
 
-        # Read the generated image
-        with open(filepath, "rb") as f:
-            image_bytes = f.read()
+            # Read the generated image
+            with open(filepath, "rb") as f:
+                image_bytes = f.read()
 
-        # Apply text overlay
-        finalized_bytes = await asyncio.get_event_loop().run_in_executor(
-            None,
-            apply_text_overlay,
-            image_bytes,
-            card_name,
-            req.location,
-            card_idx,
-        )
+            # Apply text overlay
+            finalized_bytes = await asyncio.get_event_loop().run_in_executor(
+                None,
+                apply_text_overlay,
+                image_bytes,
+                card_name,
+                req.location,
+                card_idx,
+            )
 
-        # Overwrite with finalized image
-        with open(filepath, "wb") as f:
-            f.write(finalized_bytes)
+            # Overwrite with finalized image
+            with open(filepath, "wb") as f:
+                f.write(finalized_bytes)
 
-        finalized_count += 1
+            finalized_count += 1
 
-    # Update job with name, location, and mark as finalized to prevent re-entry
-    with get_db() as db:
-        db.execute(
-            "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
-            (req.first_name, req.location, req.job_id),
-        )
+        # Update job with name, location, and mark as finalized to prevent re-entry
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
+                (req.first_name, req.location, req.job_id),
+            )
+    except HTTPException:
+        # Revert status so the user can retry finalization
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET status = 'completed' WHERE id = ?",
+                (req.job_id,),
+            )
+        raise
+    except Exception:
+        # Revert status so the user can retry finalization
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET status = 'completed' WHERE id = ?",
+                (req.job_id,),
+            )
+        raise HTTPException(status_code=500, detail="Finalization failed")
 
     image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
 
