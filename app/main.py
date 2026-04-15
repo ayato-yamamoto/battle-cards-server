@@ -267,7 +267,10 @@ async def _run_generation(
         # Update progress as each card completes
         completed = 0
         for coro in asyncio.as_completed(tasks):
-            await coro
+            try:
+                await coro
+            except Exception as e:
+                print(f"Card generation error for job {job_id}: {e}")
             completed += 1
             progress = int(completed / total_cards * 100)
             with get_db() as db:
