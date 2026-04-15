@@ -371,75 +371,107 @@ async def finalize(req: FinalizeRequest):
     The finalized images replace the original generated images, so the
     same /api/images/{job_id}/{index} endpoint serves the final result.
     """
+    # Atomically claim the job to prevent concurrent finalization (TOCTOU guard)
     with get_db() as db:
-        job = db.execute(
-            "SELECT status, name, location FROM jobs WHERE id = ?",
+        cursor = db.execute(
+            "UPDATE jobs SET status = 'finalizing' WHERE id = ? AND status = 'completed'",
             (req.job_id,),
-        ).fetchone()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="ジョブが見つかりません")
-
-    job_dict = dict(job)
-    if job_dict["status"] != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"ジョブがまだ完了していません (status: {job_dict['status']})",
         )
+        if cursor.rowcount == 0:
+            # Check if job exists to give a better error message
+            job = db.execute(
+                "SELECT status FROM jobs WHERE id = ?",
+                (req.job_id,),
+            ).fetchone()
+            if not job:
+                raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+            raise HTTPException(
+                status_code=400,
+                detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {dict(job)['status']})",
+            )
 
-    with get_db() as db:
-        images = db.execute(
-            "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
-            (req.job_id,),
-        ).fetchall()
+    # Track temp files so we can clean up on failure
+    temp_files: list[tuple[str, str]] = []  # (temp_path, original_path)
 
-    if not images:
-        raise HTTPException(status_code=400, detail="生成された画像がありません")
+    try:
+        with get_db() as db:
+            images = db.execute(
+                "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
+                (req.job_id,),
+            ).fetchall()
 
-    # Apply text overlay to each generated image
-    finalized_count = 0
-    for img_row in images:
-        img_dict = dict(img_row)
-        card_idx = img_dict["idx"]
-        filepath = img_dict["file_path"]
+        if not images:
+            raise HTTPException(status_code=400, detail="生成された画像がありません")
 
-        if not os.path.exists(filepath):
-            continue
+        # Phase 1: Apply text overlay and write to temp files (originals untouched)
+        for img_row in images:
+            img_dict = dict(img_row)
+            card_idx = img_dict["idx"]
+            filepath = img_dict["file_path"]
 
-        # Generate battle card name from naming logic
-        card_name = generate_card_name(req.first_name, card_idx)
+            if not os.path.exists(filepath):
+                continue
 
-        # Read the generated image
-        with open(filepath, "rb") as f:
-            image_bytes = f.read()
+            # Generate battle card name from naming logic (seeded for deterministic retries)
+            card_name = generate_card_name(req.first_name, card_idx, seed=f"{req.job_id}-{card_idx}")
 
-        # Apply text overlay
-        finalized_bytes = await asyncio.get_event_loop().run_in_executor(
-            None,
-            apply_text_overlay,
-            image_bytes,
-            card_name,
-            req.location,
-            card_idx,
-        )
+            # Read the original generated image
+            with open(filepath, "rb") as f:
+                image_bytes = f.read()
 
-        # Overwrite with finalized image
-        with open(filepath, "wb") as f:
-            f.write(finalized_bytes)
+            # Apply text overlay
+            finalized_bytes = await asyncio.get_event_loop().run_in_executor(
+                None,
+                apply_text_overlay,
+                image_bytes,
+                card_name,
+                req.location,
+                card_idx,
+            )
 
-        finalized_count += 1
+            # Write to temp file (original is preserved)
+            temp_path = filepath + ".finalized"
+            with open(temp_path, "wb") as f:
+                f.write(finalized_bytes)
+            temp_files.append((temp_path, filepath))
 
-    # Update job with name, location, and mark as finalized to prevent re-entry
-    with get_db() as db:
-        db.execute(
-            "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
-            (req.first_name, req.location, req.job_id),
-        )
+        # Phase 2: All overlays succeeded — atomically replace originals
+        for temp_path, original_path in temp_files:
+            os.replace(temp_path, original_path)
+
+        # Phase 3: Update job status
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
+                (req.first_name, req.location, req.job_id),
+            )
+    except HTTPException:
+        # Clean up temp files and revert status so the user can retry
+        for temp_path, _ in temp_files:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET status = 'completed' WHERE id = ?",
+                (req.job_id,),
+            )
+        raise
+    except Exception:
+        # Clean up temp files and revert status so the user can retry
+        for temp_path, _ in temp_files:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET status = 'completed' WHERE id = ?",
+                (req.job_id,),
+            )
+        raise HTTPException(status_code=500, detail="Finalization failed")
 
     image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
 
     return {
         "status": "finalized",
-        "finalized_count": finalized_count,
+        "finalized_count": len(temp_files),
         "images": image_urls,
     }
