@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
+from .image_processing import apply_text_overlay, get_template_bytes
+from .naming import generate_card_name
 
 app = FastAPI()
 
@@ -99,8 +101,8 @@ async def upload_image(
 # ---------------------------------------------------------------------
 class GenerateRequest(BaseModel):
     session_id: str
-    name: str
-    location: str
+    name: str = ""
+    location: str = ""
     advertise: bool = False
     mode: str = "single"
 
@@ -200,6 +202,9 @@ async def _generate_single_card(
     with open(source_path, "rb") as f:
         image_bytes = f.read()
 
+    # Load template image for this card
+    template_bytes = get_template_bytes(card_idx)
+
     # Generate via Gemini (run in thread to avoid blocking)
     result_bytes = await asyncio.get_event_loop().run_in_executor(
         None,
@@ -210,6 +215,7 @@ async def _generate_single_card(
         location,
         card_idx,
         total_cards if not advertise else total_cards - 1,
+        template_bytes,
     )
 
     if result_bytes:
@@ -342,3 +348,98 @@ async def get_image(job_id: str, index: int):
         raise HTTPException(status_code=404, detail="画像ファイルが見つかりません")
 
     return FileResponse(filepath, media_type="image/png")
+
+
+# ---------------------------------------------------------------------
+# 5. POST /api/finalize — Apply naming logic + text overlay
+# ---------------------------------------------------------------------
+class FinalizeRequest(BaseModel):
+    job_id: str
+    first_name: str
+    location: str
+
+
+@app.post("/api/finalize")
+async def finalize(req: FinalizeRequest):
+    """Apply naming logic and text overlay to generated images.
+
+    This endpoint should be called after AI generation is complete and
+    the user has entered their name. It reads the generated images,
+    applies a battle card name (from the naming logic) and location text
+    overlay to each card, and saves the finalized images.
+
+    The finalized images replace the original generated images, so the
+    same /api/images/{job_id}/{index} endpoint serves the final result.
+    """
+    with get_db() as db:
+        job = db.execute(
+            "SELECT status, name, location FROM jobs WHERE id = ?",
+            (req.job_id,),
+        ).fetchone()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+    job_dict = dict(job)
+    if job_dict["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"ジョブがまだ完了していません (status: {job_dict['status']})",
+        )
+
+    with get_db() as db:
+        images = db.execute(
+            "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
+            (req.job_id,),
+        ).fetchall()
+
+    if not images:
+        raise HTTPException(status_code=400, detail="生成された画像がありません")
+
+    # Apply text overlay to each generated image
+    finalized_count = 0
+    for img_row in images:
+        img_dict = dict(img_row)
+        card_idx = img_dict["idx"]
+        filepath = img_dict["file_path"]
+
+        if not os.path.exists(filepath):
+            continue
+
+        # Generate battle card name from naming logic
+        card_name = generate_card_name(req.first_name, card_idx)
+
+        # Read the generated image
+        with open(filepath, "rb") as f:
+            image_bytes = f.read()
+
+        # Apply text overlay
+        finalized_bytes = await asyncio.get_event_loop().run_in_executor(
+            None,
+            apply_text_overlay,
+            image_bytes,
+            card_name,
+            req.location,
+            card_idx,
+        )
+
+        # Overwrite with finalized image
+        with open(filepath, "wb") as f:
+            f.write(finalized_bytes)
+
+        finalized_count += 1
+
+    # Update job with name and location
+    with get_db() as db:
+        db.execute(
+            "UPDATE jobs SET name = ?, location = ? WHERE id = ?",
+            (req.first_name, req.location, req.job_id),
+        )
+
+    image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
+
+    return {
+        "status": "finalized",
+        "finalized_count": finalized_count,
+        "images": image_urls,
+    }
