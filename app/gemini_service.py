@@ -7,7 +7,17 @@ from google.genai import types
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME = "gemini-2.5-flash-preview-04-17"
+MODEL_NAME = "gemini-3-pro-image-preview"
+
+# Card themes for 6 battle cards
+CARD_THEMES = [
+    "Fire theme — flames and volcanic background, warrior outfit with red armor",
+    "Ice theme — frost crystals and snowy background, knight outfit with blue armor",
+    "Lightning theme — electric sparks and stormy background, speed fighter outfit with yellow accents",
+    "Nature theme — vines and forest background, ranger outfit with green cloak",
+    "Shadow theme — dark energy and night background, assassin outfit with purple cape",
+    "Light theme — holy aura and heavenly background, paladin outfit with golden armor",
+]
 
 
 def get_client() -> genai.Client:
@@ -31,26 +41,26 @@ def generate_battle_card(
     """
     client = get_client()
 
-    prompt = (
-        f"Transform this photo into an epic battle trading card illustration. "
-        f"The card should have a dramatic, anime-style art with vibrant colors and dynamic effects. "
-        f"Card details: Player name is '{name}', location is '{location}'. "
-        f"This is card {card_index} of {total_cards} in the set. "
-        f"Make each card feel unique with different poses, effects, and color schemes. "
-        f"Card {card_index} style: "
-    )
+    theme = CARD_THEMES[(card_index - 1) % len(CARD_THEMES)]
 
-    # Add variety to each card
-    styles = [
-        "Fire theme with red and orange flames, aggressive battle pose",
-        "Ice theme with blue crystals and frost effects, defensive stance",
-        "Lightning theme with electric yellow sparks, speed attack pose",
-        "Nature theme with green vines and earth power, guardian stance",
-        "Shadow theme with purple dark energy, mysterious floating pose",
-        "Light theme with golden holy aura, victorious celebration pose",
-    ]
-    style_index = (card_index - 1) % len(styles)
-    prompt += styles[style_index]
+    prompt = (
+        f"添付の人物の画像をバトルカード風にアレンジしてください。\n"
+        f"カード {card_index} / {total_cards} 枚目のテーマ: {theme}\n\n"
+        f"【必須ルール】\n"
+        f"- このバトルカードのテーマに合う衣装に着せ替え、髪型もテーマに合わせて加工すること\n"
+        f"- 顔は写真のままでイラスト風にしないこと。添付した画像の人はイラスト風などにはせず写真を元に加工すること\n"
+        f"- 人物の顔や体の大きさは統一すること。人物を配置する上下左右のバランスも統一すること\n"
+        f"- カードの配置やサイズ、雰囲気は他のカードと統一すること\n"
+        f"- インクジェットプリンターで印刷しても色が潰れないよう、明るさを最適に調整すること\n\n"
+        f"【カード情報】\n"
+        f"- プレイヤー名: {name}\n"
+        f"- ロケーション: {location}\n\n"
+        f"【出力仕様】\n"
+        f"- 印刷サイズ: 63mm × 88mm\n"
+        f"- 解像度: 600 DPI\n"
+        f"- 必要なピクセル数: 1488 × 2079 ピクセル\n"
+        f"- バトルカードのフォーマットで出力すること（枠、ステータス表示、名前表示を含む）\n"
+    )
 
     try:
         response = client.models.generate_content(
