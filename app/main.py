@@ -371,21 +371,24 @@ async def finalize(req: FinalizeRequest):
     The finalized images replace the original generated images, so the
     same /api/images/{job_id}/{index} endpoint serves the final result.
     """
+    # Atomically claim the job to prevent concurrent finalization (TOCTOU guard)
     with get_db() as db:
-        job = db.execute(
-            "SELECT status, name, location FROM jobs WHERE id = ?",
+        cursor = db.execute(
+            "UPDATE jobs SET status = 'finalizing' WHERE id = ? AND status = 'completed'",
             (req.job_id,),
-        ).fetchone()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="ジョブが見つかりません")
-
-    job_dict = dict(job)
-    if job_dict["status"] != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"ジョブがまだ完了していません (status: {job_dict['status']})",
         )
+        if cursor.rowcount == 0:
+            # Check if job exists to give a better error message
+            job = db.execute(
+                "SELECT status FROM jobs WHERE id = ?",
+                (req.job_id,),
+            ).fetchone()
+            if not job:
+                raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+            raise HTTPException(
+                status_code=400,
+                detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {dict(job)['status']})",
+            )
 
     with get_db() as db:
         images = db.execute(
