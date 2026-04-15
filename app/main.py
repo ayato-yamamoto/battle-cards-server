@@ -472,6 +472,6 @@ async def finalize(req: FinalizeRequest):
 
     return {
         "status": "finalized",
-        "finalized_count": finalized_count,
+        "finalized_count": len(temp_files),
         "images": image_urls,
     }
