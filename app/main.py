@@ -390,6 +390,9 @@ async def finalize(req: FinalizeRequest):
                 detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {dict(job)['status']})",
             )
 
+    # Track temp files so we can clean up on failure
+    temp_files: list[tuple[str, str]] = []  # (temp_path, original_path)
+
     try:
         with get_db() as db:
             images = db.execute(
@@ -400,8 +403,7 @@ async def finalize(req: FinalizeRequest):
         if not images:
             raise HTTPException(status_code=400, detail="生成された画像がありません")
 
-        # Apply text overlay to each generated image
-        finalized_count = 0
+        # Phase 1: Apply text overlay and write to temp files (originals untouched)
         for img_row in images:
             img_dict = dict(img_row)
             card_idx = img_dict["idx"]
@@ -410,10 +412,10 @@ async def finalize(req: FinalizeRequest):
             if not os.path.exists(filepath):
                 continue
 
-            # Generate battle card name from naming logic
-            card_name = generate_card_name(req.first_name, card_idx)
+            # Generate battle card name from naming logic (seeded for deterministic retries)
+            card_name = generate_card_name(req.first_name, card_idx, seed=f"{req.job_id}-{card_idx}")
 
-            # Read the generated image
+            # Read the original generated image
             with open(filepath, "rb") as f:
                 image_bytes = f.read()
 
@@ -427,20 +429,27 @@ async def finalize(req: FinalizeRequest):
                 card_idx,
             )
 
-            # Overwrite with finalized image
-            with open(filepath, "wb") as f:
+            # Write to temp file (original is preserved)
+            temp_path = filepath + ".finalized"
+            with open(temp_path, "wb") as f:
                 f.write(finalized_bytes)
+            temp_files.append((temp_path, filepath))
 
-            finalized_count += 1
+        # Phase 2: All overlays succeeded — atomically replace originals
+        for temp_path, original_path in temp_files:
+            os.replace(temp_path, original_path)
 
-        # Update job with name, location, and mark as finalized to prevent re-entry
+        # Phase 3: Update job status
         with get_db() as db:
             db.execute(
                 "UPDATE jobs SET name = ?, location = ?, status = 'finalized' WHERE id = ?",
                 (req.first_name, req.location, req.job_id),
             )
     except HTTPException:
-        # Revert status so the user can retry finalization
+        # Clean up temp files and revert status so the user can retry
+        for temp_path, _ in temp_files:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         with get_db() as db:
             db.execute(
                 "UPDATE jobs SET status = 'completed' WHERE id = ?",
@@ -448,7 +457,10 @@ async def finalize(req: FinalizeRequest):
             )
         raise
     except Exception:
-        # Revert status so the user can retry finalization
+        # Clean up temp files and revert status so the user can retry
+        for temp_path, _ in temp_files:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         with get_db() as db:
             db.execute(
                 "UPDATE jobs SET status = 'completed' WHERE id = ?",

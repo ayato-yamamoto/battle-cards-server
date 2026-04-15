@@ -80,18 +80,22 @@ THEME_NAMES: dict[int, list[NameTemplate]] = {
 }
 
 
-def generate_card_name(first_name: str, card_index: int) -> str:
+def generate_card_name(first_name: str, card_index: int, seed: str | None = None) -> str:
     """Generate a battle card name for the given first name and card index.
 
     Args:
         first_name: The user's first name (ideally in katakana).
         card_index: Card number 1-6.
+        seed: Optional seed for deterministic selection. When provided,
+              the same seed always produces the same template choice,
+              making retries safe.
 
     Returns:
         The generated battle card name string.
     """
     templates = THEME_NAMES.get(card_index, THEME_NAMES[1])
-    template = random.choice(templates)
+    rng = random.Random(seed) if seed else random
+    template = rng.choice(templates)
 
     if template.suffix:
         return f"{template.prefix} {first_name} {template.suffix}"
