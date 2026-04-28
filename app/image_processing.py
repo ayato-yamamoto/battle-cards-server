@@ -127,8 +127,8 @@ def apply_text_overlay(
     loc_bbox = draw.textbbox((0, 0), location, font=loc_font)
     loc_tw = loc_bbox[2] - loc_bbox[0]
     loc_th = loc_bbox[3] - loc_bbox[1]
-    loc_x = _LOCATION_BOX["x1"] + (loc_box_w - loc_tw) // 2
-    loc_y = _LOCATION_BOX["y1"] + (loc_box_h - loc_th) // 2
+    loc_x = _LOCATION_BOX["x1"] + (loc_box_w - loc_tw) // 2 - loc_bbox[0]
+    loc_y = _LOCATION_BOX["y1"] + (loc_box_h - loc_th) // 2 - loc_bbox[1]
     # Shadow for readability
     draw.text((loc_x + 1, loc_y + 1), location, font=loc_font, fill=(0, 0, 0, 180))
     draw.text((loc_x, loc_y), location, font=loc_font, fill=(255, 255, 255, 255))
@@ -140,8 +140,8 @@ def apply_text_overlay(
     name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
     name_tw = name_bbox[2] - name_bbox[0]
     name_th = name_bbox[3] - name_bbox[1]
-    name_x = _NAME_BOX["x1"] + (name_box_w - name_tw) // 2
-    name_y = _NAME_BOX["y1"] + (name_box_h - name_th) // 2
+    name_x = _NAME_BOX["x1"] + (name_box_w - name_tw) // 2 - name_bbox[0]
+    name_y = _NAME_BOX["y1"] + (name_box_h - name_th) // 2 - name_bbox[1]
     # Shadow for readability
     draw.text((name_x + 2, name_y + 2), first_name, font=name_font, fill=(0, 0, 0, 200))
     draw.text((name_x, name_y), first_name, font=name_font, fill=(255, 255, 255, 255))
