@@ -2,7 +2,7 @@
 
 Handles:
 - Compositing AI-generated character onto template card backgrounds
-- Text overlay (card name + location) at the bottom of cards
+- Text overlay (first name + location) placed inside template text boxes
 """
 
 import os
@@ -62,23 +62,52 @@ def get_template_bytes(card_index: int) -> bytes | None:
         return f.read()
 
 
+# Text box regions on the template (in production 1488x2079 coordinates).
+# Upper box: location name
+_LOCATION_BOX = {"x1": 340, "y1": 1630, "x2": 1150, "y2": 1680}
+# Lower box: user's first name
+_NAME_BOX = {"x1": 340, "y1": 1790, "x2": 1150, "y2": 1920}
+
+
+def _fit_font_size(
+    text: str,
+    max_width: int,
+    max_height: int,
+    start_size: int,
+    min_size: int = 12,
+) -> ImageFont.FreeTypeFont:
+    """Find the largest font size that fits *text* inside the given bounds."""
+    dummy = Image.new("RGBA", (1, 1))
+    draw = ImageDraw.Draw(dummy)
+    for size in range(start_size, min_size - 1, -1):
+        font = _get_font(size)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        if tw <= max_width and th <= max_height:
+            return font
+    return _get_font(min_size)
+
+
 def apply_text_overlay(
     image_bytes: bytes,
-    card_name: str,
+    first_name: str,
     location: str,
     card_index: int,
 ) -> bytes:
-    """Apply card name and location text overlay to the bottom of a generated image.
+    """Place location and first name into the template's text boxes.
 
-    The card name is displayed in a larger font, and the location in a smaller
-    font below it. Both are centered horizontally. A semi-transparent dark
-    banner is drawn behind the text for readability.
+    The template image has two pre-designed boxes at the bottom:
+      - Upper box: location name (smaller text)
+      - Lower box: user's first name (larger text)
+    Text is centred horizontally and vertically within each box.
+    No banner is drawn; the template already provides the background.
 
     Args:
         image_bytes: The AI-generated card image (PNG bytes).
-        card_name: The generated battle card name (from naming logic).
+        first_name: The user's given name to display.
         location: The location name to display.
-        card_index: Card index (1-6) for theme-aware styling.
+        card_index: Card index (1-6), reserved for future per-theme tweaks.
 
     Returns:
         The final composited image as PNG bytes.
@@ -89,65 +118,33 @@ def apply_text_overlay(
     if img.size != (CARD_WIDTH, CARD_HEIGHT):
         img = img.resize((CARD_WIDTH, CARD_HEIGHT), Image.LANCZOS)
 
-    # Font sizes
-    name_font_size = 56
-    location_font_size = 36
-    name_font = _get_font(name_font_size)
-    location_font = _get_font(location_font_size)
-
-    # Create a temporary draw to measure text
-    temp_draw = ImageDraw.Draw(img)
-
-    # Measure text dimensions
-    name_bbox = temp_draw.textbbox((0, 0), card_name, font=name_font)
-    name_w = name_bbox[2] - name_bbox[0]
-    name_h = name_bbox[3] - name_bbox[1]
-
-    loc_bbox = temp_draw.textbbox((0, 0), location, font=location_font)
-    loc_w = loc_bbox[2] - loc_bbox[0]
-    loc_h = loc_bbox[3] - loc_bbox[1]
-
-    # If the card name is too wide, reduce font size
-    if name_w > CARD_WIDTH - 80:
-        name_font_size = int(name_font_size * (CARD_WIDTH - 80) / name_w)
-        name_font = _get_font(name_font_size)
-        name_bbox = temp_draw.textbbox((0, 0), card_name, font=name_font)
-        name_w = name_bbox[2] - name_bbox[0]
-        name_h = name_bbox[3] - name_bbox[1]
-
-    # Banner dimensions
-    padding_x = 40
-    padding_y = 20
-    spacing = 10  # between name and location
-    total_text_h = name_h + spacing + loc_h
-    banner_h = total_text_h + padding_y * 2
-    banner_y = CARD_HEIGHT - banner_h - 30  # 30px from bottom edge
-
-    # Draw semi-transparent dark banner
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    overlay_draw.rounded_rectangle(
-        [padding_x, banner_y, CARD_WIDTH - padding_x, banner_y + banner_h],
-        radius=16,
-        fill=(0, 0, 0, 160),
-    )
-    img = Image.alpha_composite(img, overlay)
-
-    # Draw text
     draw = ImageDraw.Draw(img)
 
-    # Card name (centered, white, bold look)
-    name_x = (CARD_WIDTH - name_w) // 2
-    name_y = banner_y + padding_y
-    # Draw slight shadow for depth
-    draw.text((name_x + 2, name_y + 2), card_name, font=name_font, fill=(0, 0, 0, 200))
-    draw.text((name_x, name_y), card_name, font=name_font, fill=(255, 255, 255, 255))
+    # --- Upper box: location ---
+    loc_box_w = _LOCATION_BOX["x2"] - _LOCATION_BOX["x1"]
+    loc_box_h = _LOCATION_BOX["y2"] - _LOCATION_BOX["y1"]
+    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=40)
+    loc_bbox = draw.textbbox((0, 0), location, font=loc_font)
+    loc_tw = loc_bbox[2] - loc_bbox[0]
+    loc_th = loc_bbox[3] - loc_bbox[1]
+    loc_x = _LOCATION_BOX["x1"] + (loc_box_w - loc_tw) // 2
+    loc_y = _LOCATION_BOX["y1"] + (loc_box_h - loc_th) // 2
+    # Shadow for readability
+    draw.text((loc_x + 1, loc_y + 1), location, font=loc_font, fill=(0, 0, 0, 180))
+    draw.text((loc_x, loc_y), location, font=loc_font, fill=(255, 255, 255, 255))
 
-    # Location (centered, slightly smaller, light gray)
-    loc_x = (CARD_WIDTH - loc_w) // 2
-    loc_y = name_y + name_h + spacing
-    draw.text((loc_x + 1, loc_y + 1), location, font=location_font, fill=(0, 0, 0, 180))
-    draw.text((loc_x, loc_y), location, font=location_font, fill=(220, 220, 220, 255))
+    # --- Lower box: first name ---
+    name_box_w = _NAME_BOX["x2"] - _NAME_BOX["x1"]
+    name_box_h = _NAME_BOX["y2"] - _NAME_BOX["y1"]
+    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=90)
+    name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
+    name_tw = name_bbox[2] - name_bbox[0]
+    name_th = name_bbox[3] - name_bbox[1]
+    name_x = _NAME_BOX["x1"] + (name_box_w - name_tw) // 2
+    name_y = _NAME_BOX["y1"] + (name_box_h - name_th) // 2
+    # Shadow for readability
+    draw.text((name_x + 2, name_y + 2), first_name, font=name_font, fill=(0, 0, 0, 200))
+    draw.text((name_x, name_y), first_name, font=name_font, fill=(255, 255, 255, 255))
 
     # Convert back to RGB for PNG output
     final = img.convert("RGB")
