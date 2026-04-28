@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, get_template_bytes
-from .naming import generate_card_name
 
 app = FastAPI()
 
@@ -412,19 +411,16 @@ async def finalize(req: FinalizeRequest):
             if not os.path.exists(filepath):
                 continue
 
-            # Generate battle card name from naming logic (seeded for deterministic retries)
-            card_name = generate_card_name(req.first_name, card_idx, seed=f"{req.job_id}-{card_idx}")
-
             # Read the original generated image
             with open(filepath, "rb") as f:
                 image_bytes = f.read()
 
-            # Apply text overlay
+            # Apply text overlay (first name in lower box, location in upper box)
             finalized_bytes = await asyncio.get_event_loop().run_in_executor(
                 None,
                 apply_text_overlay,
                 image_bytes,
-                card_name,
+                req.first_name,
                 req.location,
                 card_idx,
             )
