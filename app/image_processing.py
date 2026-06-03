@@ -34,11 +34,25 @@ TEMPLATE_FILES: dict[int, str] = {
 # Ad card background image
 AD_TEMPLATE_FILE = "advertisment.png"
 
-# Font paths (IPA Gothic for Japanese text)
+# Font directory bundled with this package
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+
+# Font search paths: bundled font first, then OS-specific paths
 _FONT_PATHS = [
-    "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",  # IPA P Gothic
-    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",   # IPA Gothic
-    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",  # fallback
+    # Bundled font (works on all platforms)
+    os.path.join(_FONTS_DIR, "NotoSansJP.ttf"),
+    # Linux (IPA Gothic)
+    "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    # macOS (Hiragino)
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+    # Windows
+    "C:/Windows/Fonts/msgothic.ttc",
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/yugothb.ttf",
 ]
 
 
@@ -47,8 +61,8 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
     for path in _FONT_PATHS:
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
-    # Last resort: default font (may not support Japanese)
-    return ImageFont.load_default()
+    # Pillow 10.1+ supports sized default font
+    return ImageFont.load_default(size=size)
 
 
 def generate_ad_card(
