@@ -25,4 +25,4 @@ data/
 Thumbs.db
 
 # templates
-#app/templates
+app/templates
