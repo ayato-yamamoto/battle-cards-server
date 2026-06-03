@@ -184,12 +184,13 @@ def get_template_bytes(card_index: int) -> bytes | None:
         return f.read()
 
 
-# Text box regions on the template (in 1488x2079 coordinates).
-# Expanded boxes for better text visibility.
-# Upper box: location name
-_LOCATION_BOX = {"x1": 200, "y1": 1600, "x2": 1290, "y2": 1720}
-# Lower box: user's first name
-_NAME_BOX = {"x1": 200, "y1": 1750, "x2": 1290, "y2": 1960}
+# Text banner region on the latest template set (in 1488x2079 coordinates).
+# The new backgrounds use a single wide banner near the bottom, so both the
+# location and first name are laid out inside this shared frame.
+_TEXT_BANNER_BOX = {"x1": 185, "y1": 1570, "x2": 1303, "y2": 1730}
+_TEXT_BANNER_PADDING_X = 24
+_TEXT_BANNER_PADDING_Y = 12
+_LOCATION_HEIGHT_RATIO = 0.42
 
 
 def _fit_font_size(
@@ -218,12 +219,13 @@ def apply_text_overlay(
     location: str,
     card_index: int,
 ) -> bytes:
-    """Place location and first name into the template's text boxes.
+    """Place location and first name into the template's bottom banner.
 
-    The template image has two pre-designed boxes at the bottom:
-      - Upper box: location name (smaller text)
-      - Lower box: user's first name (larger text)
-    Text is centred horizontally and vertically within each box.
+    The latest template set has a single wide frame near the bottom. The
+    overlay splits that frame into two stacked text areas:
+      - Upper area: location name (smaller text)
+      - Lower area: user's first name (larger text)
+    Text is centred horizontally and vertically within each area.
     No banner is drawn; the template already provides the background.
 
     Args:
@@ -243,31 +245,52 @@ def apply_text_overlay(
 
     draw = ImageDraw.Draw(img)
 
-    # --- Upper box: location ---
-    loc_box_w = _LOCATION_BOX["x2"] - _LOCATION_BOX["x1"]
-    loc_box_h = _LOCATION_BOX["y2"] - _LOCATION_BOX["y1"]
-    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=80)
+    banner_x1 = _TEXT_BANNER_BOX["x1"] + _TEXT_BANNER_PADDING_X
+    banner_y1 = _TEXT_BANNER_BOX["y1"] + _TEXT_BANNER_PADDING_Y
+    banner_x2 = _TEXT_BANNER_BOX["x2"] - _TEXT_BANNER_PADDING_X
+    banner_y2 = _TEXT_BANNER_BOX["y2"] - _TEXT_BANNER_PADDING_Y
+    banner_w = banner_x2 - banner_x1
+    banner_h = banner_y2 - banner_y1
+    split_y = banner_y1 + int(banner_h * _LOCATION_HEIGHT_RATIO)
+
+    location_box = {"x1": banner_x1, "y1": banner_y1, "x2": banner_x2, "y2": split_y}
+    name_box = {"x1": banner_x1, "y1": split_y, "x2": banner_x2, "y2": banner_y2}
+
+    # --- Upper area: location ---
+    loc_box_w = location_box["x2"] - location_box["x1"]
+    loc_box_h = location_box["y2"] - location_box["y1"]
+    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=56, min_size=22)
     loc_bbox = draw.textbbox((0, 0), location, font=loc_font)
     loc_tw = loc_bbox[2] - loc_bbox[0]
     loc_th = loc_bbox[3] - loc_bbox[1]
-    loc_x = _LOCATION_BOX["x1"] + (loc_box_w - loc_tw) // 2 - loc_bbox[0]
-    loc_y = _LOCATION_BOX["y1"] + (loc_box_h - loc_th) // 2 - loc_bbox[1]
-    # Shadow for readability
-    draw.text((loc_x + 1, loc_y + 1), location, font=loc_font, fill=(0, 0, 0, 180))
-    draw.text((loc_x, loc_y), location, font=loc_font, fill=(255, 255, 255, 255))
+    loc_x = location_box["x1"] + (loc_box_w - loc_tw) // 2 - loc_bbox[0]
+    loc_y = location_box["y1"] + (loc_box_h - loc_th) // 2 - loc_bbox[1]
+    draw.text(
+        (loc_x, loc_y),
+        location,
+        font=loc_font,
+        fill=(60, 35, 24, 255),
+        stroke_width=2,
+        stroke_fill=(255, 255, 255, 180),
+    )
 
-    # --- Lower box: first name ---
-    name_box_w = _NAME_BOX["x2"] - _NAME_BOX["x1"]
-    name_box_h = _NAME_BOX["y2"] - _NAME_BOX["y1"]
-    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=140)
+    # --- Lower area: first name ---
+    name_box_w = name_box["x2"] - name_box["x1"]
+    name_box_h = name_box["y2"] - name_box["y1"]
+    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=88, min_size=30)
     name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
     name_tw = name_bbox[2] - name_bbox[0]
     name_th = name_bbox[3] - name_bbox[1]
-    name_x = _NAME_BOX["x1"] + (name_box_w - name_tw) // 2 - name_bbox[0]
-    name_y = _NAME_BOX["y1"] + (name_box_h - name_th) // 2 - name_bbox[1]
-    # Shadow for readability
-    draw.text((name_x + 2, name_y + 2), first_name, font=name_font, fill=(0, 0, 0, 200))
-    draw.text((name_x, name_y), first_name, font=name_font, fill=(255, 255, 255, 255))
+    name_x = name_box["x1"] + (name_box_w - name_tw) // 2 - name_bbox[0]
+    name_y = name_box["y1"] + (name_box_h - name_th) // 2 - name_bbox[1]
+    draw.text(
+        (name_x, name_y),
+        first_name,
+        font=name_font,
+        fill=(35, 20, 15, 255),
+        stroke_width=3,
+        stroke_fill=(255, 255, 255, 200),
+    )
 
     # Convert back to RGB for PNG output
     final = img.convert("RGB")
