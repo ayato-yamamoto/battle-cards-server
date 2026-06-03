@@ -12,10 +12,11 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL_NAME = "gemini-3.1-flash-image-preview"
 # MODEL_NAME = "gemini-3-pro-image-preview"
 
-# Card themes for 6 battle cards
+# Card themes for 5 battle cards (水テーマは一旦使用しない)
+# 旧テーマ:
+#   "(水)テーマは、青緑の水と浮遊する泡",
 CARD_THEMES = [
     "(炎)テーマは、オレンジと赤の炎と燃える粒子",
-    "(水)テーマは、青緑の水と浮遊する泡",
     "(雷)テーマは、青紫の稲妻と電気エネルギー",
     "(自然)テーマは、緑の魔法オーラと浮遊する葉",
     "(虚無)テーマは、紫と黒の神秘的なエネルギー",
