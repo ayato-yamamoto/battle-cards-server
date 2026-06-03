@@ -76,14 +76,18 @@ def generate_ad_card(
 
     draw = ImageDraw.Draw(img)
 
+    # Font sizes scaled proportionally to image height
+    msg_font_size = max(36, img.height // 10)    # ~10% of height
+    sub_font_size = max(28, img.height // 13)     # ~7.5% of height
+
     # Build text lines
     lines: list[tuple[str, int]] = []  # (text, font_size)
     if message:
-        lines.append((message, 28))
+        lines.append((message, msg_font_size))
     if store_name:
-        lines.append((f"店舗名：{store_name}", 24))
+        lines.append((f"店舗名：{store_name}", sub_font_size))
     if company_name:
-        lines.append((f"会社名：{company_name}", 24))
+        lines.append((f"会社名：{company_name}", sub_font_size))
 
     if not lines:
         # No text to overlay; return image as-is
@@ -91,10 +95,10 @@ def generate_ad_card(
         img.convert("RGB").save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
-    # Calculate text area dimensions
-    padding_x = 40
-    padding_y = 24
-    line_spacing = 16
+    # Calculate text area dimensions (scaled to image size)
+    padding_x = max(40, img.width // 20)
+    padding_y = max(24, img.height // 20)
+    line_spacing = max(16, img.height // 30)
     fonts: list[ImageFont.FreeTypeFont] = []
     text_widths: list[int] = []
     text_heights: list[int] = []
@@ -104,8 +108,8 @@ def generate_ad_card(
 
     for text, size in lines:
         max_w = int(img.width * 0.8) - 2 * padding_x
-        max_h = size + 10
-        font = _fit_font_size(text, max_w, max_h, start_size=size, min_size=14)
+        max_h = size + 20
+        font = _fit_font_size(text, max_w, max_h, start_size=size, min_size=20)
         fonts.append(font)
         bbox = dummy_draw.textbbox((0, 0), text, font=font)
         tw = bbox[2] - bbox[0]
@@ -166,11 +170,12 @@ def get_template_bytes(card_index: int) -> bytes | None:
         return f.read()
 
 
-# Text box regions on the template (in production 1488x2079 coordinates).
+# Text box regions on the template (in 1488x2079 coordinates).
+# Expanded boxes for better text visibility.
 # Upper box: location name
-_LOCATION_BOX = {"x1": 340, "y1": 1630, "x2": 1150, "y2": 1680}
+_LOCATION_BOX = {"x1": 200, "y1": 1600, "x2": 1290, "y2": 1720}
 # Lower box: user's first name
-_NAME_BOX = {"x1": 340, "y1": 1790, "x2": 1150, "y2": 1920}
+_NAME_BOX = {"x1": 200, "y1": 1750, "x2": 1290, "y2": 1960}
 
 
 def _fit_font_size(
@@ -227,7 +232,7 @@ def apply_text_overlay(
     # --- Upper box: location ---
     loc_box_w = _LOCATION_BOX["x2"] - _LOCATION_BOX["x1"]
     loc_box_h = _LOCATION_BOX["y2"] - _LOCATION_BOX["y1"]
-    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=40)
+    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=80)
     loc_bbox = draw.textbbox((0, 0), location, font=loc_font)
     loc_tw = loc_bbox[2] - loc_bbox[0]
     loc_th = loc_bbox[3] - loc_bbox[1]
@@ -240,7 +245,7 @@ def apply_text_overlay(
     # --- Lower box: first name ---
     name_box_w = _NAME_BOX["x2"] - _NAME_BOX["x1"]
     name_box_h = _NAME_BOX["y2"] - _NAME_BOX["y1"]
-    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=90)
+    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=140)
     name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
     name_tw = name_bbox[2] - name_bbox[0]
     name_th = name_bbox[3] - name_bbox[1]
