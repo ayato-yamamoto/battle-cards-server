@@ -52,7 +52,7 @@ iPadアプリをビルドする際に、サーバーのURLを指定します：
 
 ```bash
 # ローカルネットワーク内で接続する場合（HTTPSが必要）
-flutter run --dart-define=API_BASE_URL=https://your-server-ip:8000
+flutter run --dart-define=API_BASE_URL=https://localhost:8080
 ```
 
 > **注意:** iPadアプリはHTTPS接続を要求します。ローカル開発時は自己署名証明書を使用するか、ngrokなどのトンネリングサービスを利用してください。

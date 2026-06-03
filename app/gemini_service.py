@@ -1,3 +1,4 @@
+
 import base64
 import os
 import time
@@ -8,8 +9,8 @@ from google.genai import types
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-# MODEL_NAME = "gemini-3.1-flash-image-preview"
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.1-flash-image-preview"
+# MODEL_NAME = "gemini-3-pro-image-preview"
 
 # Card themes for 6 battle cards
 CARD_THEMES = [
