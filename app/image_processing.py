@@ -218,21 +218,23 @@ def apply_text_overlay(
     first_name: str,
     location: str,
     card_index: int,
+    ruby_target: str | None = None,
+    ruby_reading: str | None = None,
 ) -> bytes:
     """Place location and first name into the template's bottom banner.
 
     The latest template set has a single wide frame near the bottom. The
     overlay splits that frame into two stacked text areas:
       - Upper area: location name (smaller text)
-      - Lower area: user's first name (larger text)
-    Text is centred horizontally and vertically within each area.
-    No banner is drawn; the template already provides the background.
+      - Lower area: user's first name (larger text) with optional ruby
 
     Args:
         image_bytes: The AI-generated card image (PNG bytes).
         first_name: The user's given name to display.
         location: The location name to display.
         card_index: Card index (1-6), reserved for future per-theme tweaks.
+        ruby_target: Kanji substring within first_name to show ruby above.
+        ruby_reading: Hiragana reading for ruby_target.
 
     Returns:
         The final composited image as PNG bytes.
@@ -270,27 +272,62 @@ def apply_text_overlay(
         location,
         font=loc_font,
         fill=(50, 30, 20, 255),
-        stroke_width=4,
-        stroke_fill=(255, 255, 255, 230),
+        stroke_width=6,
+        stroke_fill=(255, 255, 255, 240),
     )
 
-    # --- Lower area: first name ---
+    # --- Lower area: first name with optional ruby ---
     name_box_w = name_box["x2"] - name_box["x1"]
     name_box_h = name_box["y2"] - name_box["y1"]
-    name_font = _fit_font_size(first_name, name_box_w, name_box_h, start_size=100, min_size=28)
+
+    has_ruby = bool(ruby_target and ruby_reading)
+    ruby_reserve_h = int(name_box_h * 0.2) if has_ruby else 0
+    effective_name_h = name_box_h - ruby_reserve_h
+
+    name_font = _fit_font_size(
+        first_name, name_box_w, effective_name_h, start_size=100, min_size=28
+    )
     name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
     name_tw = name_bbox[2] - name_bbox[0]
     name_th = name_bbox[3] - name_bbox[1]
     name_x = name_box["x1"] + (name_box_w - name_tw) // 2 - name_bbox[0]
-    name_y = name_box["y1"] + (name_box_h - name_th) // 2 - name_bbox[1]
+    name_y = (
+        name_box["y1"]
+        + ruby_reserve_h
+        + (effective_name_h - name_th) // 2
+        - name_bbox[1]
+    )
     draw.text(
         (name_x, name_y),
         first_name,
         font=name_font,
         fill=(30, 18, 12, 255),
-        stroke_width=5,
-        stroke_fill=(255, 255, 255, 240),
+        stroke_width=7,
+        stroke_fill=(255, 255, 255, 250),
     )
+
+    # --- Ruby (reading) above kanji portion ---
+    if has_ruby and ruby_target in first_name:
+        target_bbox = draw.textbbox((0, 0), ruby_target, font=name_font)
+        target_w = target_bbox[2] - target_bbox[0]
+
+        ruby_font_size = max(16, name_font.size // 3)
+        ruby_font = _get_font(ruby_font_size)
+        ruby_bbox = draw.textbbox((0, 0), ruby_reading, font=ruby_font)
+        ruby_w = ruby_bbox[2] - ruby_bbox[0]
+        ruby_h = ruby_bbox[3] - ruby_bbox[1]
+
+        ruby_x = name_x + (target_w - ruby_w) // 2
+        ruby_y = name_y - ruby_h - 4
+
+        draw.text(
+            (ruby_x, ruby_y),
+            ruby_reading,
+            font=ruby_font,
+            fill=(50, 30, 20, 220),
+            stroke_width=2,
+            stroke_fill=(255, 255, 255, 200),
+        )
 
     # Convert back to RGB for PNG output
     final = img.convert("RGB")
