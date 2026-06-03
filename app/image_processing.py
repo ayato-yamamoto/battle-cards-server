@@ -18,14 +18,21 @@ CARD_HEIGHT = 2079
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 # Template file mapping: card_index -> filename
+# 水テーマは一旦使用しない（5枚生成+広告モード固定のため）
+# 旧マッピング:
+#   1: "fire.png", 2: "water.png", 3: "thunder.png",
+#   4: "nature.png", 5: "void.png", 6: "light.png"
 TEMPLATE_FILES: dict[int, str] = {
     1: "fire.png",
-    2: "water.png",
-    3: "thunder.png",
-    4: "nature.png",
-    5: "void.png",
-    6: "light.png",
+    # 2: "water.png",  # 水テーマは一旦使用しない
+    2: "thunder.png",
+    3: "nature.png",
+    4: "void.png",
+    5: "light.png",
 }
+
+# Ad card background image
+AD_TEMPLATE_FILE = "advertisment.png"
 
 # Font paths (IPA Gothic for Japanese text)
 _FONT_PATHS = [
@@ -42,6 +49,103 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
             return ImageFont.truetype(path, size)
     # Last resort: default font (may not support Japanese)
     return ImageFont.load_default()
+
+
+def generate_ad_card(
+    message: str,
+    store_name: str,
+    company_name: str,
+) -> bytes:
+    """Generate an advertisement card from the advertisment.png template.
+
+    The ad card uses the advertisment.png as a landscape background,
+    with a semi-transparent white rectangle in the center containing
+    the message, store name, and company name.
+
+    Returns the ad card image as PNG bytes.
+    """
+    ad_path = os.path.join(TEMPLATES_DIR, AD_TEMPLATE_FILE)
+    if not os.path.exists(ad_path):
+        raise FileNotFoundError(f"Ad template not found: {ad_path}")
+
+    img = Image.open(ad_path).convert("RGBA")
+
+    # Ensure landscape orientation (width > height)
+    if img.width < img.height:
+        img = img.transpose(Image.ROTATE_90)
+
+    draw = ImageDraw.Draw(img)
+
+    # Build text lines
+    lines: list[tuple[str, int]] = []  # (text, font_size)
+    if message:
+        lines.append((message, 28))
+    if store_name:
+        lines.append((f"店舗名：{store_name}", 24))
+    if company_name:
+        lines.append((f"会社名：{company_name}", 24))
+
+    if not lines:
+        # No text to overlay; return image as-is
+        buf = BytesIO()
+        img.convert("RGB").save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    # Calculate text area dimensions
+    padding_x = 40
+    padding_y = 24
+    line_spacing = 16
+    fonts: list[ImageFont.FreeTypeFont] = []
+    text_widths: list[int] = []
+    text_heights: list[int] = []
+
+    dummy = Image.new("RGBA", (1, 1))
+    dummy_draw = ImageDraw.Draw(dummy)
+
+    for text, size in lines:
+        max_w = int(img.width * 0.8) - 2 * padding_x
+        max_h = size + 10
+        font = _fit_font_size(text, max_w, max_h, start_size=size, min_size=14)
+        fonts.append(font)
+        bbox = dummy_draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        text_widths.append(tw)
+        text_heights.append(th)
+
+    total_text_h = sum(text_heights) + line_spacing * (len(lines) - 1)
+    max_text_w = max(text_widths)
+
+    box_w = max_text_w + 2 * padding_x
+    box_h = total_text_h + 2 * padding_y
+    box_x = (img.width - box_w) // 2
+    box_y = (img.height - box_h) // 2
+
+    # Draw semi-transparent white rectangle
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rectangle(
+        [box_x, box_y, box_x + box_w, box_y + box_h],
+        fill=(255, 255, 255, 220),
+    )
+    img = Image.alpha_composite(img, overlay)
+    draw = ImageDraw.Draw(img)
+
+    # Draw text lines centered in the box
+    current_y = box_y + padding_y
+    for i, (text, _size) in enumerate(lines):
+        font = fonts[i]
+        tw = text_widths[i]
+        tx = (img.width - tw) // 2
+        bbox = dummy_draw.textbbox((0, 0), text, font=font)
+        ty_offset = bbox[1]
+        draw.text((tx - bbox[0], current_y - ty_offset), text, font=font, fill=(0, 0, 0, 255))
+        current_y += text_heights[i] + line_spacing
+
+    final = img.convert("RGB")
+    buf = BytesIO()
+    final.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def get_template_path(card_index: int) -> str | None:

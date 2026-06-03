@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
-from .image_processing import apply_text_overlay, get_template_bytes
+from .image_processing import apply_text_overlay, generate_ad_card, get_template_bytes
 
 app = FastAPI()
 
@@ -163,20 +163,16 @@ async def _generate_single_card(
     generated_dir: str,
 ) -> bool:
     """Generate a single card. Returns True if successful."""
-    # Card 6 with advertise=True: use the uploaded ad image directly
+    # Card 6 with advertise=True: use advertisment.png as placeholder
+    # (ad text overlay is applied during finalize)
     if advertise and card_idx == 6:
-        ad_upload = None
-        for idx, fpath, mtype in uploads:
-            if idx == 6:
-                ad_upload = (fpath, mtype)
-                break
-
-        if ad_upload:
+        from .image_processing import AD_TEMPLATE_FILE, TEMPLATES_DIR
+        ad_path = os.path.join(TEMPLATES_DIR, AD_TEMPLATE_FILE)
+        if os.path.exists(ad_path):
             out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
-            with open(ad_upload[0], "rb") as src:
+            with open(ad_path, "rb") as src:
                 with open(out_path, "wb") as dst:
                     dst.write(src.read())
-
             with get_db() as db:
                 db.execute(
                     "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
@@ -359,6 +355,9 @@ class FinalizeRequest(BaseModel):
     job_id: str
     first_name: str
     location: str
+    ad_message: str = ""
+    ad_store_name: str = ""
+    ad_company_name: str = ""
 
 
 @app.post("/api/finalize")
@@ -418,15 +417,25 @@ async def finalize(req: FinalizeRequest):
             with open(filepath, "rb") as f:
                 image_bytes = f.read()
 
-            # Apply text overlay (first name in lower box, location in upper box)
-            finalized_bytes = await asyncio.get_event_loop().run_in_executor(
-                None,
-                apply_text_overlay,
-                image_bytes,
-                req.first_name,
-                req.location,
-                card_idx,
-            )
+            # Card 6 (ad card): apply ad text overlay instead of battle card overlay
+            if card_idx == 6:
+                finalized_bytes = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    generate_ad_card,
+                    req.ad_message,
+                    req.ad_store_name,
+                    req.ad_company_name,
+                )
+            else:
+                # Apply text overlay (first name in lower box, location in upper box)
+                finalized_bytes = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    apply_text_overlay,
+                    image_bytes,
+                    req.first_name,
+                    req.location,
+                    card_idx,
+                )
 
             # Write to temp file (original is preserved)
             temp_path = filepath + ".finalized"
