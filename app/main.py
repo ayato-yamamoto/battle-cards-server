@@ -439,9 +439,11 @@ async def finalize(req: FinalizeRequest):
                     None,
                     apply_text_overlay,
                     image_bytes,
-                    card_name,
+                    card_name.display,
                     req.location,
                     card_idx,
+                    card_name.ruby_target,
+                    card_name.ruby_reading,
                 )
 
             # Write to temp file (original is preserved)
