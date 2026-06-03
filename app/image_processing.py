@@ -270,8 +270,8 @@ def apply_text_overlay(
         location,
         font=loc_font,
         fill=(50, 30, 20, 255),
-        stroke_width=2,
-        stroke_fill=(255, 255, 255, 200),
+        stroke_width=4,
+        stroke_fill=(255, 255, 255, 230),
     )
 
     # --- Lower area: first name ---
@@ -288,8 +288,8 @@ def apply_text_overlay(
         first_name,
         font=name_font,
         fill=(30, 18, 12, 255),
-        stroke_width=3,
-        stroke_fill=(255, 255, 255, 220),
+        stroke_width=5,
+        stroke_fill=(255, 255, 255, 240),
     )
 
     # Convert back to RGB for PNG output

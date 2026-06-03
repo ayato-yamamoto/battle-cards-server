@@ -1,6 +1,6 @@
 """Naming logic for battle card characters.
 
-Each card theme has 5 name templates. A template consists of a prefix and
+Each card theme has name templates. A template consists of a prefix and
 an optional suffix. The user's first name (in katakana) is inserted between
 them to form the final battle card name.
 
@@ -41,26 +41,33 @@ THEME_NAMES: dict[int, list[NameTemplate]] = {
     # 氷・水属性系（一旦使用しない）
     # 2: [
     #     NameTemplate(prefix="氷結王アイス", suffix=None),
-    #     NameTemplate(prefix="蒼氷の騎士", suffix="ナイト"),
+    #     NameTemplate(prefix="蒼水の騎士", suffix="ナイト"),
     #     NameTemplate(prefix="氷雪姫", suffix="プリンセス"),
     #     NameTemplate(prefix="氷河竜", suffix="ドラゴン"),
-    #     NameTemplate(prefix="凍魔導士", suffix="ウィザード"),
+    #     NameTemplate(prefix="凍結魔導士", suffix="ウィザード"),
     # ],
     # 雷・電気属性系
     2: [
         NameTemplate(prefix="雷神皇サンダー", suffix=None),
         NameTemplate(prefix="電光剣士", suffix="ライト"),
-        NameTemplate(prefix="雷鳴戦士", suffix="ウォリアー"),
+        NameTemplate(prefix="雷鳴の戦士", suffix="ウォリアー"),
         NameTemplate(prefix="嵐竜", suffix="ドラゴン"),
         NameTemplate(prefix="雷撃魔人", suffix="デーモン"),
     ],
-    # 自然 (風・大気 + 地・土)
+    # 自然 (風・大気属性系 + 地・土属性系)
     3: [
+        # 風・大気属性系
         NameTemplate(prefix="疾風王ウィンド", suffix=None),
-        NameTemplate(prefix="大地王", suffix="キング"),
-        NameTemplate(prefix="天空竜", suffix="ドラゴン"),
-        NameTemplate(prefix="岩石巨人ロック", suffix=None),
+        NameTemplate(prefix="風刃の", suffix="KAZE"),
         NameTemplate(prefix="暴風の", suffix="ウォリアー"),
+        NameTemplate(prefix="天空竜", suffix="ドラゴン"),
+        NameTemplate(prefix="竜巻魔神", suffix="デーモン"),
+        # 地・土属性系
+        NameTemplate(prefix="大地王", suffix="キング"),
+        NameTemplate(prefix="岩石巨人ロック", suffix=None),
+        NameTemplate(prefix="地震の戦士", suffix="ナイト"),
+        NameTemplate(prefix="山岳竜", suffix="ドラゴン"),
+        NameTemplate(prefix="鉄壁の", suffix="ガーディアン"),
     ],
     # 虚無 (闇・邪属性系)
     4: [
