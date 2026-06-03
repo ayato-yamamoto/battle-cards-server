@@ -2,7 +2,7 @@
 
 Handles:
 - Compositing AI-generated character onto template card backgrounds
-- Text overlay (first name + location) placed inside template text boxes
+- Text overlay (battle card name) placed inside template text banner
 """
 
 import os
@@ -37,31 +37,40 @@ AD_TEMPLATE_FILE = "advertisment.png"
 # Font directory bundled with this package
 _FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
-# Font search paths: bundled font first, then OS-specific paths
+# Font search paths: bundled variable font first, then static fallbacks
+_VARIABLE_FONT_PATH = os.path.join(_FONTS_DIR, "NotoSansJP-Variable.ttf")
 _FONT_PATHS = [
-    # Bundled font (works on all platforms)
     os.path.join(_FONTS_DIR, "NotoSansJP.ttf"),
-    # Linux (IPA Gothic)
     "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
     "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
     "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-    # macOS (Hiragino)
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
-    # Windows
     "C:/Windows/Fonts/msgothic.ttc",
     "C:/Windows/Fonts/meiryo.ttc",
     "C:/Windows/Fonts/yugothb.ttf",
 ]
 
 
-def _get_font(size: int) -> ImageFont.FreeTypeFont:
-    """Load a Japanese-capable font at the given size."""
+def _get_font(
+    size: int, weight: str = "Bold"
+) -> ImageFont.FreeTypeFont:
+    """Load a Japanese-capable font at the given size and weight.
+
+    Uses the variable font (NotoSansJP-Variable.ttf) when available so the
+    weight axis can be set explicitly. Falls back to static font files.
+    """
+    if os.path.exists(_VARIABLE_FONT_PATH):
+        font = ImageFont.truetype(_VARIABLE_FONT_PATH, size)
+        try:
+            font.set_variation_by_name(weight)
+        except Exception:
+            pass
+        return font
     for path in _FONT_PATHS:
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
-    # Pillow 10.1+ supports sized default font
     return ImageFont.load_default(size=size)
 
 
@@ -185,12 +194,10 @@ def get_template_bytes(card_index: int) -> bytes | None:
 
 
 # Text banner region on the latest template set (in 1488x2079 coordinates).
-# The new backgrounds use a single wide banner near the bottom, so both the
-# location and first name are laid out inside this shared frame.
+# The full banner is used for the battle card name (location was removed).
 _TEXT_BANNER_BOX = {"x1": 175, "y1": 1545, "x2": 1315, "y2": 1755}
 _TEXT_BANNER_PADDING_X = 20
 _TEXT_BANNER_PADDING_Y = 8
-_LOCATION_HEIGHT_RATIO = 0.38
 
 
 def _fit_font_size(
@@ -216,22 +223,20 @@ def _fit_font_size(
 def apply_text_overlay(
     image_bytes: bytes,
     first_name: str,
-    location: str,
     card_index: int,
     ruby_target: str | None = None,
     ruby_reading: str | None = None,
 ) -> bytes:
-    """Place location and first name into the template's bottom banner.
+    """Place battle card name into the template's bottom banner.
 
-    The latest template set has a single wide frame near the bottom. The
-    overlay splits that frame into two stacked text areas:
-      - Upper area: location name (smaller text)
-      - Lower area: user's first name (larger text) with optional ruby
+    The full banner area is used for the card name. Ruby (furigana) is
+    rendered above the kanji portion when provided.
+
+    Designed for print readability at 59mm x 86mm card size (600 DPI).
 
     Args:
         image_bytes: The AI-generated card image (PNG bytes).
-        first_name: The user's given name to display.
-        location: The location name to display.
+        first_name: The battle card name to display.
         card_index: Card index (1-6), reserved for future per-theme tweaks.
         ruby_target: Kanji substring within first_name to show ruby above.
         ruby_reading: Hiragana reading for ruby_target.
@@ -247,62 +252,39 @@ def apply_text_overlay(
 
     draw = ImageDraw.Draw(img)
 
+    # Full banner area for name (no location split)
     banner_x1 = _TEXT_BANNER_BOX["x1"] + _TEXT_BANNER_PADDING_X
     banner_y1 = _TEXT_BANNER_BOX["y1"] + _TEXT_BANNER_PADDING_Y
     banner_x2 = _TEXT_BANNER_BOX["x2"] - _TEXT_BANNER_PADDING_X
     banner_y2 = _TEXT_BANNER_BOX["y2"] - _TEXT_BANNER_PADDING_Y
     banner_w = banner_x2 - banner_x1
     banner_h = banner_y2 - banner_y1
-    split_y = banner_y1 + int(banner_h * _LOCATION_HEIGHT_RATIO)
-
-    location_box = {"x1": banner_x1, "y1": banner_y1, "x2": banner_x2, "y2": split_y}
-    name_box = {"x1": banner_x1, "y1": split_y, "x2": banner_x2, "y2": banner_y2}
-
-    # --- Upper area: location ---
-    loc_box_w = location_box["x2"] - location_box["x1"]
-    loc_box_h = location_box["y2"] - location_box["y1"]
-    loc_font = _fit_font_size(location, loc_box_w, loc_box_h, start_size=52, min_size=20)
-    loc_bbox = draw.textbbox((0, 0), location, font=loc_font)
-    loc_tw = loc_bbox[2] - loc_bbox[0]
-    loc_th = loc_bbox[3] - loc_bbox[1]
-    loc_x = location_box["x1"] + (loc_box_w - loc_tw) // 2 - loc_bbox[0]
-    loc_y = location_box["y1"] + (loc_box_h - loc_th) // 2 - loc_bbox[1]
-    draw.text(
-        (loc_x, loc_y),
-        location,
-        font=loc_font,
-        fill=(50, 30, 20, 255),
-        stroke_width=6,
-        stroke_fill=(255, 255, 255, 240),
-    )
-
-    # --- Lower area: first name with optional ruby ---
-    name_box_w = name_box["x2"] - name_box["x1"]
-    name_box_h = name_box["y2"] - name_box["y1"]
 
     has_ruby = bool(ruby_target and ruby_reading)
-    ruby_reserve_h = int(name_box_h * 0.2) if has_ruby else 0
-    effective_name_h = name_box_h - ruby_reserve_h
+    ruby_reserve_h = int(banner_h * 0.20) if has_ruby else 0
+    effective_name_h = banner_h - ruby_reserve_h
 
     name_font = _fit_font_size(
-        first_name, name_box_w, effective_name_h, start_size=100, min_size=28
+        first_name, banner_w, effective_name_h, start_size=140, min_size=28
     )
     name_bbox = draw.textbbox((0, 0), first_name, font=name_font)
     name_tw = name_bbox[2] - name_bbox[0]
     name_th = name_bbox[3] - name_bbox[1]
-    name_x = name_box["x1"] + (name_box_w - name_tw) // 2 - name_bbox[0]
+    name_x = banner_x1 + (banner_w - name_tw) // 2 - name_bbox[0]
     name_y = (
-        name_box["y1"]
+        banner_y1
         + ruby_reserve_h
         + (effective_name_h - name_th) // 2
         - name_bbox[1]
     )
+
+    # Draw with moderate stroke for print legibility (bold font + thin outline)
     draw.text(
         (name_x, name_y),
         first_name,
         font=name_font,
         fill=(30, 18, 12, 255),
-        stroke_width=7,
+        stroke_width=3,
         stroke_fill=(255, 255, 255, 250),
     )
 
@@ -312,7 +294,7 @@ def apply_text_overlay(
         target_w = target_bbox[2] - target_bbox[0]
 
         ruby_font_size = max(16, name_font.size // 3)
-        ruby_font = _get_font(ruby_font_size)
+        ruby_font = _get_font(ruby_font_size, weight="Medium")
         ruby_bbox = draw.textbbox((0, 0), ruby_reading, font=ruby_font)
         ruby_w = ruby_bbox[2] - ruby_bbox[0]
         ruby_h = ruby_bbox[3] - ruby_bbox[1]
@@ -325,7 +307,7 @@ def apply_text_overlay(
             ruby_reading,
             font=ruby_font,
             fill=(50, 30, 20, 220),
-            stroke_width=2,
+            stroke_width=1,
             stroke_fill=(255, 255, 255, 200),
         )
 

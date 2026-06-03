@@ -434,13 +434,12 @@ async def finalize(req: FinalizeRequest):
                     card_idx,
                     seed=f"{req.job_id}-{card_idx}",
                 )
-                # Apply text overlay (card name in lower box, location in upper box)
+                # Apply text overlay (card name fills the full banner)
                 finalized_bytes = await asyncio.get_event_loop().run_in_executor(
                     None,
                     apply_text_overlay,
                     image_bytes,
                     card_name.display,
-                    req.location,
                     card_idx,
                     card_name.ruby_target,
                     card_name.ruby_reading,
