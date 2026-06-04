@@ -11,6 +11,7 @@ from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, generate_ad_card, get_template_bytes
 from .naming import generate_card_name
+from .vision_service import validate_face
 
 app = FastAPI()
 
@@ -49,6 +50,31 @@ async def create_session():
     with get_db() as db:
         db.execute("INSERT INTO sessions (id) VALUES (?)", (session_id,))
     return {"session_id": session_id}
+
+
+# ---------------------------------------------------------------------
+# 1.5 POST /api/validate  — Cloud Vision face validation
+# ---------------------------------------------------------------------
+@app.post("/api/validate")
+async def validate_image(
+    image: UploadFile = File(...),
+):
+    """Validate that the uploaded image has exactly one front-facing person.
+
+    Uses Google Cloud Vision Face Detection.
+    Returns {"valid": true} or {"valid": false, "error": "..."}.
+    """
+    contents = await image.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="ファイルサイズが5MBを超えています")
+
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, validate_face, contents
+    )
+
+    if result.valid:
+        return {"valid": True}
+    return {"valid": False, "error": result.error}
 
 
 # ---------------------------------------------------------------------
