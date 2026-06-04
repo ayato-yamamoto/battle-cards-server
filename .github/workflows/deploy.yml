@@ -24,7 +24,9 @@ jobs:
 
             git pull origin main
 
+
             # 必要に応じて実行
+            poetry install 
             # composer install --no-dev
             # php artisan migrate --force
             # npm install
