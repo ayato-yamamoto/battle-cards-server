@@ -8,6 +8,7 @@ Requires GOOGLE_APPLICATION_CREDENTIALS environment variable pointing
 to a service account JSON key file (e.g. credentials/gcp-vision-sa.json).
 """
 
+import functools
 from dataclasses import dataclass
 
 from google.cloud import vision
@@ -24,6 +25,11 @@ class ValidationResult:
     error: str | None = None
 
 
+@functools.lru_cache(maxsize=1)
+def _get_client() -> vision.ImageAnnotatorClient:
+    return vision.ImageAnnotatorClient()
+
+
 def validate_face(image_bytes: bytes) -> ValidationResult:
     """Validate that the image contains exactly one front-facing person.
 
@@ -34,7 +40,7 @@ def validate_face(image_bytes: bytes) -> ValidationResult:
         ValidationResult with ``valid=True`` if checks pass, or
         ``valid=False`` with a Japanese error message describing the issue.
     """
-    client = vision.ImageAnnotatorClient()
+    client = _get_client()
     image = vision.Image(content=image_bytes)
 
     response = client.face_detection(image=image)
