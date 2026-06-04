@@ -24,5 +24,8 @@ data/
 .DS_Store
 Thumbs.db
 
+# GCP credentials
+credentials/
+
 # templates
 app/templates
