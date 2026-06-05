@@ -12,6 +12,7 @@ jobs:
     steps:
       - name: Deploy
         run: |
+          whoami
           cd /var/www/battle-cards-server
 
           git fetch origin
