@@ -16,11 +16,3 @@ jobs:
 
           git fetch origin
           git reset --hard origin/main
-
-  # test:
-  #   runs-on: self-hosted
-
-  #   steps:
-  #     - run: echo "Hello Runner"
-  #     - run: whoami
-  #     - run: pwd
