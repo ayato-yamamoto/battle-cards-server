@@ -13,7 +13,10 @@ jobs:
       - name: Deploy
         run: |
           whoami
-          cd /var/www/battle-cards-server
 
-          git fetch origin
-          git reset --hard origin/main
+
+
+          # cd /var/www/battle-cards-server
+
+          # git fetch origin
+          # git reset --hard origin/main
