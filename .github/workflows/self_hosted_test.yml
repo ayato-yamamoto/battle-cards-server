@@ -1,13 +1,9 @@
 name: Deploy Product Server
 
-
 on:
   push:
     branches:
       - main
-
-# on:
-#   workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,11 +11,11 @@ jobs:
 
     steps:
       - name: Deploy
-        run: 
+        run: |
           cd /var/www/battle-cards-server
-          git pull origin main 
 
-
+          git fetch origin
+          git reset --hard origin/main
 
   # test:
   #   runs-on: self-hosted
