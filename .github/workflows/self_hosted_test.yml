@@ -4,7 +4,7 @@ name: Deploy Product Server
 on:
   push:
     branches:
-      -main
+      - main
 
 # on:
 #   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
         run: 
           cd /var/www/battle-cards-server
           git pull origin main 
-          
+
 
 
   # test:
