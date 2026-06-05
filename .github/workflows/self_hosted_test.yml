@@ -1,13 +1,30 @@
-name: Test Runner
+name: Deploy Product Server
+
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      -main
+
+# on:
+#   workflow_dispatch:
 
 jobs:
-  test:
+  deploy:
     runs-on: self-hosted
 
     steps:
-      - run: echo "Hello Runner"
-      - run: whoami
-      - run: pwd
+      - name: Deploy
+        run: 
+          cd /var/www/battle-cards-server
+          git pull origin main 
+          
+
+
+  # test:
+  #   runs-on: self-hosted
+
+  #   steps:
+  #     - run: echo "Hello Runner"
+  #     - run: whoami
+  #     - run: pwd
