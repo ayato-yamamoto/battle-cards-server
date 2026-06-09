@@ -521,4 +521,4 @@ async def finalize(req: FinalizeRequest):
 #　テスト
 @app.get("/test")
 async def test():
-    print ("hello world")
+    return {"message": "hello world"}
