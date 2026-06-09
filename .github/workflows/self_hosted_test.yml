@@ -1,5 +1,6 @@
 name: Deploy Product Server
 
+
 on:
   push:
     branches:
@@ -13,10 +14,7 @@ jobs:
       - name: Deploy
         run: |
           whoami
+          cd /var/www/battle-cards-server
 
-
-
-          # cd /var/www/battle-cards-server
-
-          # git fetch origin
-          # git reset --hard origin/main
+          git fetch origin
+          git reset --hard origin/main
