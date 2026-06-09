@@ -517,3 +517,8 @@ async def finalize(req: FinalizeRequest):
         "finalized_count": len(temp_files),
         "images": image_urls,
     }
+
+#　テスト
+@app.get("/test")
+async def test():
+    print ("hello world")
