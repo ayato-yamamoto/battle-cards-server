@@ -9,7 +9,9 @@ to a service account JSON key file (e.g. credentials/gcp-vision-sa.json).
 """
 
 import functools
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from google.cloud import vision
 
@@ -25,8 +27,20 @@ class ValidationResult:
     error: str | None = None
 
 
+def _ensure_credentials_env() -> None:
+    """Set default credential path if env var is not configured."""
+    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        return
+
+    # Default location in this repository.
+    default_path = Path("credentials") / "gcp-vision-sa.json"
+    if default_path.exists():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(default_path)
+
+
 @functools.lru_cache(maxsize=1)
 def _get_client() -> vision.ImageAnnotatorClient:
+    _ensure_credentials_env()
     return vision.ImageAnnotatorClient()
 
 
@@ -40,10 +54,23 @@ def validate_face(image_bytes: bytes) -> ValidationResult:
         ValidationResult with ``valid=True`` if checks pass, or
         ``valid=False`` with a Japanese error message describing the issue.
     """
-    client = _get_client()
+    try:
+        client = _get_client()
+    except Exception as e:
+        return ValidationResult(
+            valid=False,
+            error=f"Cloud Visionの初期化に失敗しました。認証情報を確認してください: {e}",
+        )
+
     image = vision.Image(content=image_bytes)
 
-    response = client.face_detection(image=image)
+    try:
+        response = client.face_detection(image=image)
+    except Exception as e:
+        return ValidationResult(
+            valid=False,
+            error=f"画像の解析に失敗しました。Cloud Vision設定を確認してください: {e}",
+        )
 
     if response.error.message:
         return ValidationResult(
