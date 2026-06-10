@@ -6,9 +6,11 @@ from typing import Optional
 
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
 
+load_dotenv() 
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 MODEL_NAME = "gemini-3.1-flash-image-preview"
 # MODEL_NAME = "gemini-3-pro-image-preview"
 

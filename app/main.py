@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+
+
+
 from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, generate_ad_card, get_template_bytes
