@@ -522,3 +522,7 @@ async def finalize(req: FinalizeRequest):
 @app.get("/test")
 async def test():
     return {"message": "hello world"}
+
+@app.get("/")
+def root():
+    return {"message": "hello"}
