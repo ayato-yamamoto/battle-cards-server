@@ -93,15 +93,15 @@ def generate_ad_card(
 
     img = Image.open(ad_path).convert("RGBA")
 
-    # Ensure landscape orientation (width > height)
-    if img.width < img.height:
-        img = img.transpose(Image.ROTATE_90)
+    # Rotate 90° clockwise to portrait orientation for card display
+    if img.width > img.height:
+        img = img.transpose(Image.Transpose.ROTATE_270)
 
     draw = ImageDraw.Draw(img)
 
-    # Font sizes scaled proportionally to image height
-    msg_font_size = max(36, img.height // 10)    # ~10% of height
-    sub_font_size = max(28, img.height // 13)     # ~7.5% of height
+    # Font sizes scaled proportionally to image width (shorter axis in portrait)
+    msg_font_size = max(36, img.width // 10)     # ~10% of width
+    sub_font_size = max(28, img.width // 13)     # ~7.5% of width
 
     # Build text lines
     lines: list[tuple[str, int]] = []  # (text, font_size)
