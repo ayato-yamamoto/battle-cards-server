@@ -431,6 +431,7 @@ async def finalize(req: FinalizeRequest):
     # Use a short DB transaction — release connection before any long work.
     claimed = False
     current_status = None
+    is_advertise = False
     with get_db() as db:
         cursor = db.execute(
             "UPDATE jobs SET status = 'finalizing' WHERE id = ? AND status = 'completed'",
@@ -447,6 +448,13 @@ async def finalize(req: FinalizeRequest):
                 logger.error("[FINALIZE] Job not found: %s", req.job_id)
                 raise HTTPException(status_code=404, detail="ジョブが見つかりません")
             current_status = dict(job)['status']
+        # Fetch advertise flag for card 6 handling
+        ad_row = db.execute(
+            "SELECT advertise FROM jobs WHERE id = ?",
+            (req.job_id,),
+        ).fetchone()
+        if ad_row:
+            is_advertise = bool(dict(ad_row)['advertise'])
 
     # --- DB connection is now closed — handle non-claimed cases outside the transaction ---
 
@@ -541,7 +549,7 @@ async def finalize(req: FinalizeRequest):
                 image_bytes = f.read()
 
             # Card 6 (ad card): apply ad text overlay instead of battle card overlay
-            if card_idx == 6:
+            if card_idx == 6 and is_advertise:
                 finalized_bytes = await asyncio.get_event_loop().run_in_executor(
                     None,
                     generate_ad_card,
