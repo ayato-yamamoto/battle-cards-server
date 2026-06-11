@@ -93,15 +93,15 @@ def generate_ad_card(
 
     img = Image.open(ad_path).convert("RGBA")
 
-    # Rotate 90° clockwise to portrait orientation for card display
-    if img.width > img.height:
-        img = img.transpose(Image.Transpose.ROTATE_270)
+    # Keep landscape orientation for text overlay — rotate to portrait at the end
+    if img.width < img.height:
+        img = img.transpose(Image.Transpose.ROTATE_90)
 
     draw = ImageDraw.Draw(img)
 
-    # Font sizes scaled proportionally to image width (shorter axis in portrait)
-    msg_font_size = max(36, img.width // 10)     # ~10% of width
-    sub_font_size = max(28, img.width // 13)     # ~7.5% of width
+    # Font sizes scaled proportionally to image height (shorter axis in landscape)
+    msg_font_size = max(36, img.height // 10)    # ~10% of height
+    sub_font_size = max(28, img.height // 13)     # ~7.5% of height
 
     # Build text lines
     lines: list[tuple[str, int]] = []  # (text, font_size)
@@ -113,7 +113,8 @@ def generate_ad_card(
         lines.append((f"会社名：{company_name}", sub_font_size))
 
     if not lines:
-        # No text to overlay; return image as-is
+        # No text to overlay; rotate to portrait and return
+        img = img.transpose(Image.Transpose.ROTATE_270)
         buf = BytesIO()
         img.convert("RGB").save(buf, format="PNG", optimize=True)
         return buf.getvalue()
@@ -168,6 +169,9 @@ def generate_ad_card(
         ty_offset = bbox[1]
         draw.text((tx - bbox[0], current_y - ty_offset), text, font=font, fill=(0, 0, 0, 255))
         current_y += text_heights[i] + line_spacing
+
+    # Rotate 90° clockwise to portrait orientation for card display/saving
+    img = img.transpose(Image.Transpose.ROTATE_270)
 
     final = img.convert("RGB")
     buf = BytesIO()
