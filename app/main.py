@@ -137,6 +137,9 @@ class GenerateRequest(BaseModel):
     location: str = ""
     advertise: bool = False
     mode: str = "single"
+    ad_message: str = ""
+    ad_store_name: str = ""
+    ad_company_name: str = ""
 
 
 @app.post("/api/generate")
@@ -177,6 +180,9 @@ async def generate(req: GenerateRequest):
             advertise=req.advertise,
             mode=req.mode,
             uploads=[(dict(u)["idx"], dict(u)["file_path"], dict(u)["mime_type"]) for u in uploads],
+            ad_message=req.ad_message,
+            ad_store_name=req.ad_store_name,
+            ad_company_name=req.ad_company_name,
         )
     )
     _active_jobs[job_id] = task
@@ -194,25 +200,33 @@ async def _generate_single_card(
     mode: str,
     uploads: list[tuple[int, str, str]],
     generated_dir: str,
+    ad_message: str = "",
+    ad_store_name: str = "",
+    ad_company_name: str = "",
 ) -> bool:
     """Generate a single card. Returns True if successful."""
-    # Card 6 with advertise=True: use advertisment.png as placeholder
-    # (ad text overlay is applied during finalize)
+    # Card 6 with advertise=True: generate ad card with rotation + text overlay
     if advertise and card_idx == 6:
-        from .image_processing import AD_TEMPLATE_FILE, TEMPLATES_DIR
-        ad_path = os.path.join(TEMPLATES_DIR, AD_TEMPLATE_FILE)
-        if os.path.exists(ad_path):
+        try:
+            ad_bytes = await asyncio.get_event_loop().run_in_executor(
+                None,
+                generate_ad_card,
+                ad_message,
+                ad_store_name,
+                ad_company_name,
+            )
             out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
-            with open(ad_path, "rb") as src:
-                with open(out_path, "wb") as dst:
-                    dst.write(src.read())
+            with open(out_path, "wb") as f:
+                f.write(ad_bytes)
             with get_db() as db:
                 db.execute(
                     "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
                     (job_id, card_idx, out_path),
                 )
             return True
-        return False
+        except Exception as e:
+            logger.error("[GENERATE] Ad card generation failed: %s", e)
+            return False
 
     # Determine source image
     if mode == "single":
@@ -269,6 +283,9 @@ async def _run_generation(
     advertise: bool,
     mode: str,
     uploads: list[tuple[int, str, str]],
+    ad_message: str = "",
+    ad_store_name: str = "",
+    ad_company_name: str = "",
 ) -> None:
     """Background task: generate 6 battle card images concurrently."""
     total_cards = 6
@@ -289,6 +306,9 @@ async def _run_generation(
                 mode=mode,
                 uploads=uploads,
                 generated_dir=generated_dir,
+                ad_message=ad_message,
+                ad_store_name=ad_store_name,
+                ad_company_name=ad_company_name,
             )
             tasks.append(task)
 
@@ -411,6 +431,7 @@ async def finalize(req: FinalizeRequest):
     # Use a short DB transaction — release connection before any long work.
     claimed = False
     current_status = None
+    is_advertise = False
     with get_db() as db:
         cursor = db.execute(
             "UPDATE jobs SET status = 'finalizing' WHERE id = ? AND status = 'completed'",
@@ -427,6 +448,13 @@ async def finalize(req: FinalizeRequest):
                 logger.error("[FINALIZE] Job not found: %s", req.job_id)
                 raise HTTPException(status_code=404, detail="ジョブが見つかりません")
             current_status = dict(job)['status']
+        # Fetch advertise flag for card 6 handling
+        ad_row = db.execute(
+            "SELECT advertise FROM jobs WHERE id = ?",
+            (req.job_id,),
+        ).fetchone()
+        if ad_row:
+            is_advertise = bool(dict(ad_row)['advertise'])
 
     # --- DB connection is now closed — handle non-claimed cases outside the transaction ---
 
@@ -521,7 +549,7 @@ async def finalize(req: FinalizeRequest):
                 image_bytes = f.read()
 
             # Card 6 (ad card): apply ad text overlay instead of battle card overlay
-            if card_idx == 6:
+            if card_idx == 6 and is_advertise:
                 finalized_bytes = await asyncio.get_event_loop().run_in_executor(
                     None,
                     generate_ad_card,
