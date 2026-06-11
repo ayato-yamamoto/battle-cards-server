@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 
@@ -15,6 +16,8 @@ from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, generate_ad_card, get_template_bytes
 from .naming import generate_card_name
 from .vision_service import validate_face
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI()
 
@@ -402,6 +405,8 @@ async def finalize(req: FinalizeRequest):
     The finalized images replace the original generated images, so the
     same /api/images/{job_id}/{index} endpoint serves the final result.
     """
+    logger.info("[FINALIZE] job_id=%s, first_name=%s", req.job_id, req.first_name)
+
     # Atomically claim the job to prevent concurrent finalization (TOCTOU guard)
     with get_db() as db:
         cursor = db.execute(
@@ -415,10 +420,13 @@ async def finalize(req: FinalizeRequest):
                 (req.job_id,),
             ).fetchone()
             if not job:
+                logger.error("[FINALIZE] Job not found: %s", req.job_id)
                 raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+            current_status = dict(job)['status']
+            logger.error("[FINALIZE] Job %s has status '%s', expected 'completed'", req.job_id, current_status)
             raise HTTPException(
                 status_code=400,
-                detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {dict(job)['status']})",
+                detail=f"ジョブがまだ完了していないか、既にfinalize済みです (status: {current_status})",
             )
 
     # Track temp files so we can clean up on failure
@@ -432,6 +440,7 @@ async def finalize(req: FinalizeRequest):
             ).fetchall()
 
         if not images:
+            logger.error("[FINALIZE] No generated images for job %s", req.job_id)
             raise HTTPException(status_code=400, detail="生成された画像がありません")
 
         # Phase 1: Apply text overlay and write to temp files (originals untouched)
