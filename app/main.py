@@ -423,6 +423,49 @@ async def finalize(req: FinalizeRequest):
                 logger.error("[FINALIZE] Job not found: %s", req.job_id)
                 raise HTTPException(status_code=404, detail="ジョブが見つかりません")
             current_status = dict(job)['status']
+
+            # If already finalizing, wait for it to complete instead of returning 400
+            if current_status == 'finalizing':
+                logger.info("[FINALIZE] Job %s already finalizing, waiting for completion...", req.job_id)
+                for _ in range(120):  # wait up to 60 seconds
+                    await asyncio.sleep(0.5)
+                    with get_db() as poll_db:
+                        poll_job = poll_db.execute(
+                            "SELECT status FROM jobs WHERE id = ?",
+                            (req.job_id,),
+                        ).fetchone()
+                    if poll_job and dict(poll_job)['status'] == 'finalized':
+                        # Return the finalized result
+                        with get_db() as result_db:
+                            images = result_db.execute(
+                                "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
+                                (req.job_id,),
+                            ).fetchall()
+                        image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
+                        logger.info("[FINALIZE] Job %s finalization completed (waited)", req.job_id)
+                        return {
+                            "status": "finalized",
+                            "finalized_count": len(images),
+                            "images": image_urls,
+                        }
+                logger.error("[FINALIZE] Timed out waiting for job %s to finish finalizing", req.job_id)
+                raise HTTPException(status_code=409, detail="Finalize処理がタイムアウトしました。もう一度お試しください。")
+
+            # If already finalized, return success with existing images
+            if current_status == 'finalized':
+                logger.info("[FINALIZE] Job %s already finalized, returning existing result", req.job_id)
+                with get_db() as result_db:
+                    images = result_db.execute(
+                        "SELECT idx, file_path FROM generated_images WHERE job_id = ? ORDER BY idx",
+                        (req.job_id,),
+                    ).fetchall()
+                image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
+                return {
+                    "status": "finalized",
+                    "finalized_count": len(images),
+                    "images": image_urls,
+                }
+
             logger.error("[FINALIZE] Job %s has status '%s', expected 'completed'", req.job_id, current_status)
             raise HTTPException(
                 status_code=400,
