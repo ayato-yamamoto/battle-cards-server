@@ -415,6 +415,8 @@ class FinalizeRequest(BaseModel):
 
 @app.post("/api/finalize")
 async def finalize(req: FinalizeRequest):
+    print(f"[FINALIZE] job_id={req.job_id}, first_name={req.first_name}")  # ← この行を追加
+
     """Apply naming logic and text overlay to generated images.
 
     This endpoint should be called after AI generation is complete and

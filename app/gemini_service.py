@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 load_dotenv() 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL_NAME = "gemini-3.1-flash-image-preview"
+MODEL_NAME = "gemini-3-pro-image" #Nano Banana Pro 最新
+# MODEL_NAME = "gemini-3.1-flash-image"  //Nano Banana 2 最新
+# MODEL_NAME = "gemini-3.1-flash-image-preview"//20260717に廃止
 # MODEL_NAME = "gemini-3-pro-image-preview"
 
 # Card themes for 5 battle cards (水テーマは一旦使用しない)
