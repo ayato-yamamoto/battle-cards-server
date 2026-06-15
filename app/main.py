@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 
 from .database import SHEETS_DIR, UPLOAD_DIR, get_db, init_db
+from .drive_service import upload_to_drive
 from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, generate_ad_card, generate_card_sheet, get_template_bytes
 from .naming import generate_card_name
@@ -614,6 +615,16 @@ async def finalize(req: FinalizeRequest):
                 with open(sheet_path, "wb") as f:
                     f.write(sheet_bytes)
                 logger.info("[FINALIZE] Card sheet generated: %s", sheet_path)
+                # Upload to Google Drive (non-blocking, non-fatal)
+                try:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        upload_to_drive,
+                        sheet_path,
+                        f"{req.job_id}_sheet.jpg",
+                    )
+                except Exception as ue:
+                    logger.warning("[FINALIZE] Drive upload failed (non-fatal): %s", ue)
         except Exception as e:
             logger.warning("[FINALIZE] Card sheet generation failed (non-fatal): %s", e)
 
