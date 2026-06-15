@@ -11,7 +11,8 @@ from pydantic import BaseModel
 
 
 
-from .database import UPLOAD_DIR, get_db, init_db
+from .database import SHEETS_DIR, UPLOAD_DIR, get_db, init_db
+from .drive_service import upload_to_drive
 from .gemini_service import generate_battle_card
 from .image_processing import apply_text_overlay, generate_ad_card, generate_card_sheet, get_template_bytes
 from .naming import generate_card_name
@@ -485,7 +486,7 @@ async def finalize(req: FinalizeRequest):
                         "finalized_count": len(images),
                         "images": image_urls,
                     }
-                    sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+                    sheet_file = os.path.join(SHEETS_DIR, f"{req.job_id}_sheet.jpg")
                     if os.path.exists(sheet_file):
                         result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
                     return result
@@ -520,7 +521,7 @@ async def finalize(req: FinalizeRequest):
                 "finalized_count": len(images),
                 "images": image_urls,
             }
-            sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+            sheet_file = os.path.join(SHEETS_DIR, f"{req.job_id}_sheet.jpg")
             if os.path.exists(sheet_file):
                 result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
             return result
@@ -609,11 +610,21 @@ async def finalize(req: FinalizeRequest):
                     None, generate_card_sheet, card_bytes_map,
                 )
                 sheet_path = os.path.join(
-                    UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg",
+                    SHEETS_DIR, f"{req.job_id}_sheet.jpg",
                 )
                 with open(sheet_path, "wb") as f:
                     f.write(sheet_bytes)
                 logger.info("[FINALIZE] Card sheet generated: %s", sheet_path)
+                # Upload to Google Drive (non-blocking, non-fatal)
+                try:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        upload_to_drive,
+                        sheet_path,
+                        f"{req.job_id}_sheet.jpg",
+                    )
+                except Exception as ue:
+                    logger.warning("[FINALIZE] Drive upload failed (non-fatal): %s", ue)
         except Exception as e:
             logger.warning("[FINALIZE] Card sheet generation failed (non-fatal): %s", e)
 
@@ -653,7 +664,7 @@ async def finalize(req: FinalizeRequest):
         "finalized_count": len(temp_files),
         "images": image_urls,
     }
-    sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+    sheet_file = os.path.join(SHEETS_DIR, f"{req.job_id}_sheet.jpg")
     if os.path.exists(sheet_file):
         result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
     return result
@@ -664,7 +675,7 @@ async def finalize(req: FinalizeRequest):
 # ---------------------------------------------------------------------
 @app.get("/api/card-sheet/{job_id}")
 async def get_card_sheet(job_id: str):
-    sheet_path = os.path.join(UPLOAD_DIR, "generated", f"{job_id}_sheet.jpg")
+    sheet_path = os.path.join(SHEETS_DIR, f"{job_id}_sheet.jpg")
     if not os.path.exists(sheet_path):
         raise HTTPException(status_code=404, detail="カードシートが見つかりません")
     return FileResponse(sheet_path, media_type="image/jpeg")

@@ -7,11 +7,13 @@ from typing import Generator
 DATA_DIR = os.environ.get("DATA_DIR", "/data" if os.path.isdir("/data") else "./data")
 DB_PATH = os.path.join(DATA_DIR, "app.db")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+SHEETS_DIR = os.path.join(DATA_DIR, "sheets")
 
 
 def _ensure_dirs() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(SHEETS_DIR, exist_ok=True)
 
 
 def init_db() -> None:
