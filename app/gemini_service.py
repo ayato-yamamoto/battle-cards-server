@@ -6,15 +6,16 @@ from typing import Optional
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 from dotenv import load_dotenv
 
 load_dotenv() 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MODEL_NAME = "gemini-3-pro-image" #Nano Banana Pro 最新
-# MODEL_NAME = "gemini-3.1-flash-image"  //Nano Banana 2 最新
-# MODEL_NAME = "gemini-3.1-flash-image-preview"//20260717に廃止
-# MODEL_NAME = "gemini-3-pro-image-preview"
+PRIMARY_MODEL = "gemini-3-pro-image"       # Nano Banana Pro 最新
+FALLBACK_MODEL = "gemini-3.1-flash-image"  # Nano Banana 2 最新
+# "gemini-3.1-flash-image-preview" → 20260717に廃止
+# "gemini-3-pro-image-preview"
 
 # Card themes for 5 battle cards (水テーマは一旦使用しない)
 # 旧テーマ:
@@ -115,11 +116,38 @@ def generate_battle_card(
 
     parts.append(types.Part.from_text(text=prompt))
 
+    # Try primary model, fall back to secondary on 503 (high demand)
+    result = _call_model_with_retry(
+        client, PRIMARY_MODEL, parts, card_index, total_cards, name, location,
+    )
+    if result is not None:
+        return result
+
+    # Primary failed with 503 — try fallback model
+    print(f"カード {card_index}: プライマリモデル失敗、フォールバックモデル ({FALLBACK_MODEL}) でリトライ")
+    return _call_model_with_retry(
+        client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
+    )
+
+
+def _call_model_with_retry(
+    client: genai.Client,
+    model_name: str,
+    parts: list[types.Part],
+    card_index: int,
+    total_cards: int,
+    name: str,
+    location: str,
+) -> Optional[bytes]:
+    """Call a Gemini model with one retry on error.
+
+    Returns image bytes on success, or None on failure.
+    """
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
             response = client.models.generate_content(
-                model=MODEL_NAME,
+                model=model_name,
                 contents=[
                     types.Content(parts=parts)
                 ],
@@ -130,31 +158,39 @@ def generate_battle_card(
 
             # Extract image from response
             if response.candidates:
-                print(f"生成成功: カード {card_index} / {total_cards} - {name} at {location}")
+                print(f"生成成功: カード {card_index} / {total_cards} ({model_name})")
                 for part in response.candidates[0].content.parts:
                     if part.inline_data and part.inline_data.mime_type.startswith("image/"):
                         return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
 
             # No image in response — treat as retryable
             if attempt < max_attempts:
-                print(f"カード {card_index}: レスポンスに画像なし、リトライします (attempt {attempt}/{max_attempts})")
+                print(f"カード {card_index}: レスポンスに画像なし ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
                 continue
 
+        except ServerError as e:
+            if e.code == 503:
+                print(f"カード {card_index}: 503 高負荷エラー ({model_name})")
+                return None  # caller will switch to fallback
+            if attempt < max_attempts:
+                print(f"カード {card_index}: ServerError ({e}) ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+            print(f"Gemini API error for card {card_index} ({model_name}, final): {e}")
         except RuntimeError:
             raise
         except TypeError as e:
-            # Handles "'NoneType' object is not iterable" errors
             if attempt < max_attempts:
-                print(f"カード {card_index}: TypeError ({e}), リトライします (attempt {attempt}/{max_attempts})")
+                print(f"カード {card_index}: TypeError ({e}) ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
                 continue
-            print(f"Gemini API error for card {card_index} (final attempt): {e}")
+            print(f"Gemini API error for card {card_index} ({model_name}, final): {e}")
         except Exception as e:
             if attempt < max_attempts:
-                print(f"カード {card_index}: エラー ({e}), リトライします (attempt {attempt}/{max_attempts})")
+                print(f"カード {card_index}: エラー ({e}) ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
                 continue
-            print(f"Gemini API error for card {card_index} (final attempt): {e}")
+            print(f"Gemini API error for card {card_index} ({model_name}, final): {e}")
 
     return None
