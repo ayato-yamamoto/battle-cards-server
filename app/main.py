@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .database import UPLOAD_DIR, get_db, init_db
 from .gemini_service import generate_battle_card
-from .image_processing import apply_text_overlay, generate_ad_card, get_template_bytes
+from .image_processing import apply_text_overlay, generate_ad_card, generate_card_sheet, get_template_bytes
 from .naming import generate_card_name
 from .vision_service import validate_face
 
@@ -484,6 +484,7 @@ async def finalize(req: FinalizeRequest):
                         "status": "finalized",
                         "finalized_count": len(images),
                         "images": image_urls,
+                        "card_sheet_url": f"/api/card-sheet/{req.job_id}",
                     }
                 if poll_status == 'completed':
                     # First attempt failed and reverted — let caller retry
@@ -515,6 +516,7 @@ async def finalize(req: FinalizeRequest):
                 "status": "finalized",
                 "finalized_count": len(images),
                 "images": image_urls,
+                "card_sheet_url": f"/api/card-sheet/{req.job_id}",
             }
         else:
             logger.error("[FINALIZE] Job %s has status '%s', expected 'completed'", req.job_id, current_status)
@@ -587,6 +589,28 @@ async def finalize(req: FinalizeRequest):
         for temp_path, original_path in temp_files:
             os.replace(temp_path, original_path)
 
+        # Phase 2.5: Generate the card sheet (all 6 cards composited)
+        try:
+            card_bytes_map: dict[int, bytes] = {}
+            for img_row in images:
+                img_dict = dict(img_row)
+                fpath = img_dict["file_path"]
+                if os.path.exists(fpath):
+                    with open(fpath, "rb") as f:
+                        card_bytes_map[img_dict["idx"]] = f.read()
+            if card_bytes_map:
+                sheet_bytes = await asyncio.get_event_loop().run_in_executor(
+                    None, generate_card_sheet, card_bytes_map,
+                )
+                sheet_path = os.path.join(
+                    UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg",
+                )
+                with open(sheet_path, "wb") as f:
+                    f.write(sheet_bytes)
+                logger.info("[FINALIZE] Card sheet generated: %s", sheet_path)
+        except Exception as e:
+            logger.warning("[FINALIZE] Card sheet generation failed (non-fatal): %s", e)
+
         # Phase 3: Update job status
         with get_db() as db:
             db.execute(
@@ -622,7 +646,20 @@ async def finalize(req: FinalizeRequest):
         "status": "finalized",
         "finalized_count": len(temp_files),
         "images": image_urls,
+        "card_sheet_url": f"/api/card-sheet/{req.job_id}",
     }
+
+
+# ---------------------------------------------------------------------
+# 6. GET /api/card-sheet/{job_id} — Serve the composited card sheet
+# ---------------------------------------------------------------------
+@app.get("/api/card-sheet/{job_id}")
+async def get_card_sheet(job_id: str):
+    sheet_path = os.path.join(UPLOAD_DIR, "generated", f"{job_id}_sheet.jpg")
+    if not os.path.exists(sheet_path):
+        raise HTTPException(status_code=404, detail="カードシートが見つかりません")
+    return FileResponse(sheet_path, media_type="image/jpeg")
+
 
 #　テスト
 @app.get("/test")

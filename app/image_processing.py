@@ -74,6 +74,73 @@ def _get_font(
     return ImageFont.load_default(size=size)
 
 
+# Card sheet template for compositing all 6 cards onto a single print sheet
+CARD_SHEET_TEMPLATE = "card_sheet.jpg"
+
+# Grid cell positions on the card_sheet.jpg template (7016×4961).
+# 3 columns × 2 rows = 6 card slots.
+_SHEET_CELLS: list[tuple[int, int, int, int]] = [
+    # (x1, y1, x2, y2) — inner cell area between border lines
+    # Row 1
+    (951, 258, 2468, 2391),    # Card 1
+    (2736, 258, 4254, 2391),   # Card 2
+    (4512, 258, 6028, 2391),   # Card 3
+    # Row 2
+    (951, 2556, 2468, 4678),   # Card 4
+    (2736, 2556, 4254, 4678),  # Card 5
+    (4512, 2556, 6028, 4678),  # Card 6
+]
+
+# Overflow percentage: cards extend this fraction beyond their cell on each side
+_SHEET_OVERFLOW_PCT = 0.012
+
+
+def generate_card_sheet(
+    card_images: dict[int, bytes],
+) -> bytes:
+    """Composite up to 6 card images onto the card sheet template.
+
+    Each card is resized to slightly overflow its cell boundary so the
+    printed cards cover the grid lines.
+
+    Args:
+        card_images: Mapping of card index (1-6) to PNG image bytes.
+
+    Returns:
+        The composited sheet image as JPEG bytes.
+    """
+    sheet_path = os.path.join(TEMPLATES_DIR, CARD_SHEET_TEMPLATE)
+    if not os.path.exists(sheet_path):
+        raise FileNotFoundError(f"Card sheet template not found: {sheet_path}")
+
+    sheet = Image.open(sheet_path).convert("RGB")
+
+    for card_idx in range(1, 7):
+        img_bytes = card_images.get(card_idx)
+        if not img_bytes:
+            continue
+
+        x1, y1, x2, y2 = _SHEET_CELLS[card_idx - 1]
+        cell_w = x2 - x1
+        cell_h = y2 - y1
+
+        overflow_x = int(cell_w * _SHEET_OVERFLOW_PCT)
+        overflow_y = int(cell_h * _SHEET_OVERFLOW_PCT)
+        target_w = cell_w + 2 * overflow_x
+        target_h = cell_h + 2 * overflow_y
+
+        card_img = Image.open(BytesIO(img_bytes)).convert("RGB")
+        card_img = card_img.resize((target_w, target_h), Image.LANCZOS)
+
+        paste_x = x1 - overflow_x
+        paste_y = y1 - overflow_y
+        sheet.paste(card_img, (paste_x, paste_y))
+
+    buf = BytesIO()
+    sheet.save(buf, format="JPEG", quality=95, optimize=True)
+    return buf.getvalue()
+
+
 def generate_ad_card(
     message: str,
     store_name: str,
