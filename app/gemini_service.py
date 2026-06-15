@@ -116,18 +116,20 @@ def generate_battle_card(
 
     parts.append(types.Part.from_text(text=prompt))
 
-    # Try primary model, fall back to secondary on 503 (high demand)
-    result = _call_model_with_retry(
-        client, PRIMARY_MODEL, parts, card_index, total_cards, name, location,
-    )
-    if result is not None:
-        return result
-
-    # Primary failed with 503 — try fallback model
-    print(f"カード {card_index}: プライマリモデル失敗、フォールバックモデル ({FALLBACK_MODEL}) でリトライ")
-    return _call_model_with_retry(
-        client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
-    )
+    # Try primary model; on 503 (high demand), fall back to secondary
+    try:
+        result = _call_model_with_retry(
+            client, PRIMARY_MODEL, parts, card_index, total_cards, name, location,
+            raise_on_503=True,
+        )
+        if result is not None:
+            return result
+        return None  # non-503 failure — no fallback
+    except ServerError:
+        print(f"カード {card_index}: 503高負荷 → フォールバックモデル ({FALLBACK_MODEL}) でリトライ")
+        return _call_model_with_retry(
+            client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
+        )
 
 
 def _call_model_with_retry(
@@ -138,10 +140,13 @@ def _call_model_with_retry(
     total_cards: int,
     name: str,
     location: str,
+    raise_on_503: bool = False,
 ) -> Optional[bytes]:
     """Call a Gemini model with one retry on error.
 
     Returns image bytes on success, or None on failure.
+    If raise_on_503 is True, re-raises the ServerError on 503 so the
+    caller can switch to a fallback model.
     """
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
@@ -170,9 +175,9 @@ def _call_model_with_retry(
                 continue
 
         except ServerError as e:
-            if e.code == 503:
+            if e.code == 503 and raise_on_503:
                 print(f"カード {card_index}: 503 高負荷エラー ({model_name})")
-                return None  # caller will switch to fallback
+                raise
             if attempt < max_attempts:
                 print(f"カード {card_index}: ServerError ({e}) ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
