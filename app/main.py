@@ -480,12 +480,15 @@ async def finalize(req: FinalizeRequest):
                         ).fetchall()
                     image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
                     logger.info("[FINALIZE] Job %s finalization completed (waited)", req.job_id)
-                    return {
+                    result: dict = {
                         "status": "finalized",
                         "finalized_count": len(images),
                         "images": image_urls,
-                        "card_sheet_url": f"/api/card-sheet/{req.job_id}",
                     }
+                    sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+                    if os.path.exists(sheet_file):
+                        result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
+                    return result
                 if poll_status == 'completed':
                     # First attempt failed and reverted — let caller retry
                     logger.info("[FINALIZE] Job %s reverted to completed, retrying...", req.job_id)
@@ -512,12 +515,15 @@ async def finalize(req: FinalizeRequest):
                     (req.job_id,),
                 ).fetchall()
             image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
-            return {
+            result: dict = {
                 "status": "finalized",
                 "finalized_count": len(images),
                 "images": image_urls,
-                "card_sheet_url": f"/api/card-sheet/{req.job_id}",
             }
+            sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+            if os.path.exists(sheet_file):
+                result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
+            return result
         else:
             logger.error("[FINALIZE] Job %s has status '%s', expected 'completed'", req.job_id, current_status)
             raise HTTPException(
@@ -642,12 +648,15 @@ async def finalize(req: FinalizeRequest):
 
     image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
 
-    return {
+    result: dict = {
         "status": "finalized",
         "finalized_count": len(temp_files),
         "images": image_urls,
-        "card_sheet_url": f"/api/card-sheet/{req.job_id}",
     }
+    sheet_file = os.path.join(UPLOAD_DIR, "generated", f"{req.job_id}_sheet.jpg")
+    if os.path.exists(sheet_file):
+        result["card_sheet_url"] = f"/api/card-sheet/{req.job_id}"
+    return result
 
 
 # ---------------------------------------------------------------------
