@@ -2,6 +2,7 @@
 import base64
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional
 
 from google import genai
@@ -14,6 +15,7 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 PRIMARY_MODEL = "gemini-3-pro-image"       # Nano Banana Pro 最新
 FALLBACK_MODEL = "gemini-3.1-flash-image"  # Nano Banana 2 最新
+PRIMARY_TIMEOUT_SEC = 90  # Timeout for primary model before fallback
 # "gemini-3.1-flash-image-preview" → 20260717に廃止
 # "gemini-3-pro-image-preview"
 
@@ -138,17 +140,29 @@ def generate_battle_card(
 
     parts.append(types.Part.from_text(text=prompt))
 
-    # Try primary model; on 503 (high demand), fall back to secondary
+    # Try primary model with timeout; on timeout or 503, fall back to secondary
     try:
-        result = _call_model_with_retry(
-            client, PRIMARY_MODEL, parts, card_index, total_cards, name, location,
-            raise_on_503=True,
-        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                _call_model_with_retry,
+                client, PRIMARY_MODEL, parts, card_index, total_cards, name, location,
+                True,  # raise_on_503
+            )
+            result = future.result(timeout=PRIMARY_TIMEOUT_SEC)
         if result is not None:
             return result
-        return None  # non-503 failure — no fallback
+        # Primary returned None (non-503 failure) — try fallback
+        print(f"カード {card_index}: プライマリ失敗 → フォールバック ({FALLBACK_MODEL}) でリトライ")
+        return _call_model_with_retry(
+            client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
+        )
+    except FuturesTimeoutError:
+        print(f"カード {card_index}: {PRIMARY_TIMEOUT_SEC}秒タイムアウト → フォールバック ({FALLBACK_MODEL}) でリトライ")
+        return _call_model_with_retry(
+            client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
+        )
     except ServerError:
-        print(f"カード {card_index}: 503高負荷 → フォールバックモデル ({FALLBACK_MODEL}) でリトライ")
+        print(f"カード {card_index}: 503高負荷 → フォールバック ({FALLBACK_MODEL}) でリトライ")
         return _call_model_with_retry(
             client, FALLBACK_MODEL, parts, card_index, total_cards, name, location,
         )
