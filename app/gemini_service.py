@@ -197,7 +197,7 @@ def _call_model_with_retry(
                     print(f"カード {card_index}: safety_ratings={safety_ratings} ({model_name})")
 
             # Check for safety block
-            if finish_reason and str(finish_reason) in _SAFETY_FINISH_REASONS:
+            if finish_reason and finish_reason in _SAFETY_FINISH_REASONS:
                 print(f"カード {card_index}: SAFETY BLOCKED ({finish_reason}) ({model_name}), attempt {attempt}/{max_attempts}")
                 if attempt < max_attempts:
                     time.sleep(2)
@@ -205,8 +205,9 @@ def _call_model_with_retry(
                 return None
 
             # Extract image from response
-            if response.candidates:
-                for part in response.candidates[0].content.parts:
+            candidate_content = response.candidates[0].content if response.candidates else None
+            if candidate_content and candidate_content.parts:
+                for part in candidate_content.parts:
                     if part.inline_data and part.inline_data.mime_type.startswith("image/"):
                         print(f"生成成功: カード {card_index} / {total_cards} ({model_name})")
                         return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
