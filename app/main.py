@@ -712,7 +712,7 @@ async def finalize(req: FinalizeRequest):
 
     result: dict = {
         "status": "finalized",
-        "finalized_count": len(temp_files),
+        "finalized_count": len(images),
         "images": image_urls,
     }
     sheet_file = os.path.join(SHEETS_DIR, f"{req.job_id}_sheet.jpg")
