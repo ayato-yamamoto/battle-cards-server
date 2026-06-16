@@ -137,6 +137,7 @@ class GenerateRequest(BaseModel):
     name: str = ""
     location: str = ""
     advertise: bool = False
+    use_custom_ad_image: bool = False
     mode: str = "single"
     ad_message: str = ""
     ad_store_name: str = ""
@@ -162,6 +163,9 @@ async def generate(req: GenerateRequest):
     if not uploads:
         raise HTTPException(status_code=400, detail="アップロードされた画像がありません")
 
+    # Determine advertise mode: 0=none, 1=text-on-template, 2=custom-image
+    ad_flag = 2 if req.use_custom_ad_image else (1 if req.advertise else 0)
+
     job_id = str(uuid.uuid4())
     with get_db() as db:
         db.execute(
@@ -169,7 +173,7 @@ async def generate(req: GenerateRequest):
             INSERT INTO jobs (id, session_id, name, location, advertise, mode, status, progress)
             VALUES (?, ?, ?, ?, ?, ?, 'processing', 0)
             """,
-            (job_id, req.session_id, req.name, req.location, int(req.advertise), req.mode),
+            (job_id, req.session_id, req.name, req.location, ad_flag, req.mode),
         )
 
     task = asyncio.create_task(
@@ -179,6 +183,7 @@ async def generate(req: GenerateRequest):
             name=req.name,
             location=req.location,
             advertise=req.advertise,
+            use_custom_ad_image=req.use_custom_ad_image,
             mode=req.mode,
             uploads=[(dict(u)["idx"], dict(u)["file_path"], dict(u)["mime_type"]) for u in uploads],
             ad_message=req.ad_message,
@@ -198,6 +203,7 @@ async def _generate_single_card(
     name: str,
     location: str,
     advertise: bool,
+    use_custom_ad_image: bool,
     mode: str,
     uploads: list[tuple[int, str, str]],
     generated_dir: str,
@@ -206,6 +212,42 @@ async def _generate_single_card(
     ad_company_name: str = "",
 ) -> bool:
     """Generate a single card. Returns True if successful."""
+    # Card 6 with custom ad image: use the uploaded image directly
+    if use_custom_ad_image and card_idx == 6:
+        try:
+            # Find uploaded image for index 6
+            custom_path = None
+            for idx, fpath, _mtype in uploads:
+                if idx == 6:
+                    custom_path = fpath
+                    break
+            if custom_path and os.path.exists(custom_path):
+                from PIL import Image as PILImage
+                from io import BytesIO
+
+                img = PILImage.open(custom_path).convert("RGB")
+                # Resize to card dimensions
+                from .image_processing import CARD_WIDTH, CARD_HEIGHT
+                img = img.resize((CARD_WIDTH, CARD_HEIGHT), PILImage.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="PNG", optimize=True)
+                card_bytes = buf.getvalue()
+
+                out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
+                with open(out_path, "wb") as f:
+                    f.write(card_bytes)
+                with get_db() as db:
+                    db.execute(
+                        "INSERT INTO generated_images (job_id, idx, file_path) VALUES (?, ?, ?)",
+                        (job_id, card_idx, out_path),
+                    )
+                return True
+            logger.error("[GENERATE] Custom ad image not found for card 6")
+            return False
+        except Exception as e:
+            logger.error("[GENERATE] Custom ad card generation failed: %s", e)
+            return False
+
     # Card 6 with advertise=True: generate ad card with rotation + text overlay
     if advertise and card_idx == 6:
         try:
@@ -257,7 +299,7 @@ async def _generate_single_card(
         name,
         location,
         card_idx,
-        total_cards if not advertise else total_cards - 1,
+        total_cards if not (advertise or use_custom_ad_image) else total_cards - 1,
         template_bytes,
     )
 
@@ -282,8 +324,9 @@ async def _run_generation(
     name: str,
     location: str,
     advertise: bool,
-    mode: str,
-    uploads: list[tuple[int, str, str]],
+    use_custom_ad_image: bool = False,
+    mode: str = "single",
+    uploads: list[tuple[int, str, str]] | None = None,
     ad_message: str = "",
     ad_store_name: str = "",
     ad_company_name: str = "",
@@ -304,8 +347,9 @@ async def _run_generation(
                 name=name,
                 location=location,
                 advertise=advertise,
+                use_custom_ad_image=use_custom_ad_image,
                 mode=mode,
-                uploads=uploads,
+                uploads=uploads or [],
                 generated_dir=generated_dir,
                 ad_message=ad_message,
                 ad_store_name=ad_store_name,
@@ -435,6 +479,7 @@ async def finalize(req: FinalizeRequest):
     claimed = False
     current_status = None
     is_advertise = False
+    is_custom_ad = False
     with get_db() as db:
         cursor = db.execute(
             "UPDATE jobs SET status = 'finalizing' WHERE id = ? AND status = 'completed'",
@@ -451,13 +496,15 @@ async def finalize(req: FinalizeRequest):
                 logger.error("[FINALIZE] Job not found: %s", req.job_id)
                 raise HTTPException(status_code=404, detail="ジョブが見つかりません")
             current_status = dict(job)['status']
-        # Fetch advertise flag for card 6 handling
+        # Fetch advertise flag for card 6 handling (0=none, 1=text, 2=custom)
         ad_row = db.execute(
             "SELECT advertise FROM jobs WHERE id = ?",
             (req.job_id,),
         ).fetchone()
         if ad_row:
-            is_advertise = bool(dict(ad_row)['advertise'])
+            ad_flag_val = dict(ad_row)['advertise']
+            is_advertise = ad_flag_val == 1
+            is_custom_ad = ad_flag_val == 2
 
     # --- DB connection is now closed — handle non-claimed cases outside the transaction ---
 
@@ -558,6 +605,10 @@ async def finalize(req: FinalizeRequest):
             # Read the original generated image
             with open(filepath, "rb") as f:
                 image_bytes = f.read()
+
+            # Card 6 with custom ad image: keep as-is (no overlay)
+            if card_idx == 6 and is_custom_ad:
+                continue
 
             # Card 6 (ad card): apply ad text overlay instead of battle card overlay
             if card_idx == 6 and is_advertise:
@@ -661,7 +712,7 @@ async def finalize(req: FinalizeRequest):
 
     result: dict = {
         "status": "finalized",
-        "finalized_count": len(temp_files),
+        "finalized_count": len(images),
         "images": image_urls,
     }
     sheet_file = os.path.join(SHEETS_DIR, f"{req.job_id}_sheet.jpg")
