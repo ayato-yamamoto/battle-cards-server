@@ -17,16 +17,40 @@ FALLBACK_MODEL = "gemini-3.1-flash-image"  # Nano Banana 2 最新
 # "gemini-3.1-flash-image-preview" → 20260717に廃止
 # "gemini-3-pro-image-preview"
 
-# Card themes for 5 battle cards (水テーマは一旦使用しない)
-# 旧テーマ:
-#   "(水)テーマは、青緑の水と浮遊する泡",
+# Card themes for 5 battle cards (English for stability with safety filters)
 CARD_THEMES = [
-    "(炎)テーマは、オレンジと赤の炎と燃える粒子",
-    "(雷)テーマは、青紫の稲妻と電気エネルギー",
-    "(自然)テーマは、緑の魔法オーラと浮遊する葉",
-    "(虚無)テーマは、紫と黒の神秘的なエネルギー",
-    "(光)テーマは、金色の神聖な光と輝き",
+    "(Fire) Theme: orange and red flames with burning embers and sparks",
+    "(Thunder) Theme: blue-purple lightning bolts and electric energy",
+    "(Nature) Theme: green magical aura with floating leaves",
+    "(Void) Theme: purple and black mystical energy",
+    "(Light) Theme: golden divine radiance and glow",
 ]
+
+# Safety settings: relax all categories to BLOCK_NONE for development
+_SAFETY_SETTINGS = [
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+]
+
+# Finish reasons that indicate safety block — retryable with sanitised prompt
+_SAFETY_FINISH_REASONS = {
+    "SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT",
+    "IMAGE_PROHIBITED_CONTENT", "BLOCKLIST",
+}
 
 
 def get_client() -> genai.Client:
@@ -73,45 +97,43 @@ def generate_battle_card(
     # Add source photo
     parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
 
-    # Build prompt text based on whether template is provided
+    # Build prompt text in English for better stability with safety filters
     if template_bytes:
         prompt = (
-            f"1枚目の画像はバトルカードのテンプレート（背景フレーム）です。\n"
-            f"2枚目の画像は人物の写真です。\n\n"
-            f"このテンプレートカードの背景・フレームデザインを維持したまま、"
-            f"人物の写真をバトルカード風にアレンジして配置してください。\n\n"
-            f"テーマ: {theme}\n\n"
-            f"【必須ルール】\n"
-            f"- テンプレート画像のカード枠・装飾・背景デザイン・画像下部の名前入力用のスペースをそのまま使用すること\n"
-            f"- このバトルカードのテーマに合う衣装に着せ替え、髪型もテーマに合わせて加工すること\n"
-            f"- 顔は写真のままでイラスト風にしないこと。添付した画像の人はイラスト風などにはせず写真を元に加工すること\n"
-            # f"- 人物の顔や体の大きさは統一すること。人物を配置する上下左右のバランスも統一すること\n"
-            f"- 人物の画像を加工する時の顔や体の角度、縮尺は変更しないこと\n"
-            # f"- カードの配置やサイズ、雰囲気は他のカードと統一すること\n"
-            f"- 日本語や英語などの言語は出力しないこと\n"
-            f"- インクジェットプリンターで印刷しても色が潰れないよう、明るさを最適に調整すること\n\n"
-            f"【出力仕様】\n"
-            f"- 印刷サイズ: 63mm × 88mm\n"
-            f"- 解像度: 600 DPI\n"
-            f"- 必要なピクセル数: 1488 × 2079 ピクセル\n"
-            f"- ステータス表示、名前表示は含まない\n"
+            f"The first image is a battle card template (background frame).\n"
+            f"The second image is a person's photo.\n\n"
+            f"While preserving the template card's frame, decorations, and background design, "
+            f"arrange the person's photo in a battle card style.\n\n"
+            f"{theme}\n\n"
+            f"[Required Rules]\n"
+            f"- Keep the template card frame, decorations, background design, and the name input space at the bottom\n"
+            f"- Change the outfit and hairstyle to match the battle card theme\n"
+            f"- Keep the face photorealistic — do NOT convert to illustration or cartoon style. Process based on the original photo\n"
+            f"- Do NOT change the face or body angle, scale, or proportions when editing\n"
+            f"- Do NOT output any text, Japanese or English characters\n"
+            f"- Adjust brightness for optimal inkjet printing — avoid crushed or overly dark colors, use vivid and high-contrast neon colors\n\n"
+            f"[Output Specifications]\n"
+            f"- Print size: 63mm x 88mm\n"
+            f"- Resolution: 600 DPI\n"
+            f"- Required pixels: 1488 x 2079 pixels\n"
+            f"- Do NOT include status display or name display\n"
         )
     else:
         prompt = (
-            f"添付の人物の画像をバトルカード風にアレンジしてください。\n"
-            f"テーマ: {theme}\n\n"
-            f"【必須ルール】\n"
-            f"- このバトルカードのテーマに合う衣装に着せ替え、髪型もテーマに合わせて加工すること\n"
-            f"- 顔は写真のままでイラスト風にしないこと。添付した画像の人はイラスト風などにはせず写真を元に加工すること\n"
-            f"- 人物の顔や体の大きさは統一すること。人物を配置する上下左右のバランスも統一すること\n"
-            f"- カードの配置やサイズ、雰囲気は他のカードと統一すること\n"
-            f"- 日本語や英語などの言語は出力しないこと\n"
-            f"- インクジェットプリンターで印刷しても色が潰れないよう、明るさを最適に調整すること\n\n"
-            f"【出力仕様】\n"
-            f"- 印刷サイズ: 63mm × 88mm\n"
-            f"- 解像度: 600 DPI\n"
-            f"- 必要なピクセル数: 1488 × 2079 ピクセル\n"
-            f"- ステータス表示、名前表示は含まない\n"
+            f"Transform the attached person's photo into a battle card style.\n"
+            f"{theme}\n\n"
+            f"[Required Rules]\n"
+            f"- Change the outfit and hairstyle to match the battle card theme\n"
+            f"- Keep the face photorealistic — do NOT convert to illustration or cartoon style. Process based on the original photo\n"
+            f"- Keep consistent face and body size. Keep consistent top/bottom/left/right balance when positioning the person\n"
+            f"- Keep consistent card layout, size, and atmosphere across all cards\n"
+            f"- Do NOT output any text, Japanese or English characters\n"
+            f"- Adjust brightness for optimal inkjet printing — avoid crushed or overly dark colors, use vivid and high-contrast neon colors\n\n"
+            f"[Output Specifications]\n"
+            f"- Print size: 63mm x 88mm\n"
+            f"- Resolution: 600 DPI\n"
+            f"- Required pixels: 1488 x 2079 pixels\n"
+            f"- Do NOT include status display or name display\n"
         )
 
     parts.append(types.Part.from_text(text=prompt))
@@ -158,21 +180,43 @@ def _call_model_with_retry(
                 ],
                 config=types.GenerateContentConfig(
                     response_modalities=["TEXT", "IMAGE"],
+                    safety_settings=_SAFETY_SETTINGS,
                 ),
             )
 
+            # Log finish reason for diagnostics
+            finish_reason = None
+            safety_ratings = None
+            if response.candidates:
+                candidate = response.candidates[0]
+                finish_reason = getattr(candidate, "finish_reason", None)
+                safety_ratings = getattr(candidate, "safety_ratings", None)
+                if finish_reason:
+                    print(f"カード {card_index}: finish_reason={finish_reason} ({model_name})")
+                if safety_ratings:
+                    print(f"カード {card_index}: safety_ratings={safety_ratings} ({model_name})")
+
+            # Check for safety block
+            if finish_reason and str(finish_reason) in _SAFETY_FINISH_REASONS:
+                print(f"カード {card_index}: SAFETY BLOCKED ({finish_reason}) ({model_name}), attempt {attempt}/{max_attempts}")
+                if attempt < max_attempts:
+                    time.sleep(2)
+                    continue
+                return None
+
             # Extract image from response
             if response.candidates:
-                print(f"生成成功: カード {card_index} / {total_cards} ({model_name})")
                 for part in response.candidates[0].content.parts:
                     if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                        print(f"生成成功: カード {card_index} / {total_cards} ({model_name})")
                         return base64.b64decode(part.inline_data.data) if isinstance(part.inline_data.data, str) else part.inline_data.data
 
-            # No image in response — treat as retryable
+            # No image in response — log and retry
             if attempt < max_attempts:
-                print(f"カード {card_index}: レスポンスに画像なし ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
+                print(f"カード {card_index}: レスポンスに画像なし (finish_reason={finish_reason}) ({model_name}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
                 continue
+            print(f"カード {card_index}: レスポンスに画像なし (finish_reason={finish_reason}) ({model_name}), 最終失敗")
 
         except ServerError as e:
             if e.code == 503 and raise_on_503:
