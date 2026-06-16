@@ -397,6 +397,16 @@ async def _run_generation(
         _active_jobs.pop(job_id, None)
 
 
+async def _drive_upload_bg(sheet_path: str, filename: str) -> None:
+    """Upload card sheet to Google Drive in background (non-fatal)."""
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, upload_to_drive, sheet_path, filename,
+        )
+    except Exception as e:
+        logger.warning("[FINALIZE] Drive upload failed (non-fatal): %s", e)
+
+
 # ---------------------------------------------------------------------
 # 4. GET /api/status
 # ---------------------------------------------------------------------
@@ -666,16 +676,10 @@ async def finalize(req: FinalizeRequest):
                 with open(sheet_path, "wb") as f:
                     f.write(sheet_bytes)
                 logger.info("[FINALIZE] Card sheet generated: %s", sheet_path)
-                # Upload to Google Drive (non-blocking, non-fatal)
-                try:
-                    await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        upload_to_drive,
-                        sheet_path,
-                        f"{req.job_id}_sheet.jpg",
-                    )
-                except Exception as ue:
-                    logger.warning("[FINALIZE] Drive upload failed (non-fatal): %s", ue)
+                # Upload to Google Drive in background (fire-and-forget)
+                asyncio.create_task(
+                    _drive_upload_bg(sheet_path, f"{req.job_id}_sheet.jpg")
+                )
         except Exception as e:
             logger.warning("[FINALIZE] Card sheet generation failed (non-fatal): %s", e)
 
@@ -696,7 +700,8 @@ async def finalize(req: FinalizeRequest):
                 (req.job_id,),
             )
         raise
-    except Exception:
+    except Exception as exc:
+        logger.error("[FINALIZE] Unexpected error for job %s: %s", req.job_id, exc, exc_info=True)
         # Clean up temp files and revert status so the user can retry
         for temp_path, _ in temp_files:
             if os.path.exists(temp_path):
@@ -709,6 +714,7 @@ async def finalize(req: FinalizeRequest):
         raise HTTPException(status_code=500, detail="Finalization failed")
 
     image_urls = [f"/api/images/{req.job_id}/{dict(img)['idx']}" for img in images]
+    logger.info("[FINALIZE] Completed job %s: %d images finalized", req.job_id, len(images))
 
     result: dict = {
         "status": "finalized",
