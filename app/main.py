@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from .database import SHEETS_DIR, UPLOAD_DIR, get_db, init_db
 from .drive_service import upload_to_drive
 from .gemini_service import generate_battle_card
+from .imagen_service import generate_battle_card_imagen
 from .image_processing import apply_text_overlay, generate_ad_card, generate_card_sheet, get_template_bytes
 from .naming import generate_card_name
 from .vision_service import validate_face
@@ -290,18 +291,34 @@ async def _generate_single_card(
     # Load template image for this card
     template_bytes = get_template_bytes(card_idx)
 
-    # Generate via Gemini (run in thread to avoid blocking)
+    effective_total = total_cards if not (advertise or use_custom_ad_image) else total_cards - 1
+
+    # Try Imagen (Vertex AI) first, fall back to Gemini on failure
     result_bytes = await asyncio.get_event_loop().run_in_executor(
         None,
-        generate_battle_card,
+        generate_battle_card_imagen,
         image_bytes,
         source_mime,
         name,
         location,
         card_idx,
-        total_cards if not (advertise or use_custom_ad_image) else total_cards - 1,
+        effective_total,
         template_bytes,
     )
+
+    if result_bytes is None:
+        print(f"[GENERATE] カード {card_idx}: Imagen失敗 → Geminiでリトライ")
+        result_bytes = await asyncio.get_event_loop().run_in_executor(
+            None,
+            generate_battle_card,
+            image_bytes,
+            source_mime,
+            name,
+            location,
+            card_idx,
+            effective_total,
+            template_bytes,
+        )
 
     if result_bytes:
         out_path = os.path.join(generated_dir, f"{job_id}_{card_idx}.png")
