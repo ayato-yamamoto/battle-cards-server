@@ -174,7 +174,7 @@ def generate_battle_card_imagen(
                 reference_images=reference_images,
                 config=types.EditImageConfig(
                     numberOfImages=1,
-                    safetyFilterLevel=types.SafetyFilterLevel.BLOCK_NONE,
+                    safetyFilterLevel=types.SafetyFilterLevel.BLOCK_ONLY_HIGH,
                     personGeneration=types.PersonGeneration.ALLOW_ALL,
                     outputMimeType="image/png",
                 ),
