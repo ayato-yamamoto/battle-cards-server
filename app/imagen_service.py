@@ -1,18 +1,18 @@
-"""Imagen 2 (Vertex AI) image generation service for battle cards.
+"""Vertex AI image generation service for battle cards.
 
-Uses Google Cloud Vertex AI Imagen API to generate battle card images
-from person photos. Requires a GCP service account with Vertex AI
-permissions and the Imagen API enabled.
+Uses Gemini model via Vertex AI (service account auth) to generate
+battle card images from person photos.
 
 Configuration (environment variables):
-    IMAGEN_CREDENTIALS — path to Imagen service account JSON key
+    IMAGEN_CREDENTIALS — path to service account JSON key
                          (falls back to GOOGLE_APPLICATION_CREDENTIALS,
                           then credentials/imagen-sa.json).
     GCP_PROJECT_ID     — GCP project ID (auto-read from SA key if unset).
     GCP_LOCATION       — Vertex AI region (default: us-central1).
-    IMAGEN_MODEL       — Imagen model for editing (default: imagen-3.0-capability-001).
+    VERTEX_MODEL       — model name (default: gemini-3.1-flash-image).
 """
 
+import base64
 import json
 import os
 import time
@@ -21,12 +21,12 @@ from typing import Optional
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Model for image editing with subject/style references
-IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "imagen-3.0-capability-001")
+VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-3.1-flash-image")
 
 CARD_THEMES = [
     "(Fire) Theme: orange and red flames with burning embers and sparks",
@@ -36,12 +36,37 @@ CARD_THEMES = [
     "(Light) Theme: golden divine radiance and glow",
 ]
 
+# Safety settings: relax all categories to BLOCK_NONE
+_SAFETY_SETTINGS = [
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+    ),
+]
+
+_SAFETY_FINISH_REASONS = {
+    "SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT",
+    "IMAGE_PROHIBITED_CONTENT", "BLOCKLIST",
+}
+
 
 def _get_credentials_path() -> str | None:
-    """Resolve Imagen service account key path.
+    """Resolve service account key path.
 
-    Priority: IMAGEN_CREDENTIALS env → GOOGLE_APPLICATION_CREDENTIALS env
-              → credentials/imagen-sa.json default file.
+    Priority: IMAGEN_CREDENTIALS env -> GOOGLE_APPLICATION_CREDENTIALS env
+              -> credentials/imagen-sa.json default file.
     """
     for env_var in ("IMAGEN_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"):
         path = os.environ.get(env_var)
@@ -97,127 +122,144 @@ def generate_battle_card_imagen(
     total_cards: int,
     template_bytes: Optional[bytes] = None,
 ) -> Optional[bytes]:
-    """Generate a single battle card using Imagen (Vertex AI).
+    """Generate a single battle card using Gemini via Vertex AI.
 
     Same interface as gemini_service.generate_battle_card so it can be
     used as a drop-in replacement.
-
-    Args:
-        image_bytes: The source person photo bytes.
-        mime_type: MIME type of the source photo.
-        name: Player name (for logging).
-        location: Location name (for logging).
-        card_index: 1-based card index.
-        total_cards: Total number of cards being generated.
-        template_bytes: Optional template card image (PNG).
-
-    Returns the generated image bytes (PNG) or None on failure.
     """
-    print(f"[IMAGEN] 生成開始: カード {card_index} / {total_cards} - {name}")
+    print(f"[VERTEX] 生成開始: カード {card_index} / {total_cards} - {name}")
 
     try:
         client = get_vertex_client()
     except RuntimeError as e:
-        print(f"[IMAGEN] Vertex AI client init failed: {e}")
+        print(f"[VERTEX] Vertex AI client init failed: {e}")
         return None
 
     theme = CARD_THEMES[(card_index - 1) % len(CARD_THEMES)]
-    model = IMAGEN_MODEL
+    model = VERTEX_MODEL
 
-    # Build reference images
-    reference_images: list[types.SubjectReferenceImage | types.StyleReferenceImage] = []
+    # Build content parts (same structure as gemini_service)
+    parts: list[types.Part] = []
 
-    # Person's photo as subject reference (preserve face/likeness)
-    reference_images.append(
-        types.SubjectReferenceImage(
-            referenceImage=types.Image(imageBytes=image_bytes, mimeType=mime_type),
-            referenceId=0,
-            config=types.SubjectReferenceConfig(
-                subjectType=types.SubjectReferenceType.SUBJECT_TYPE_PERSON,
-            ),
-        )
-    )
-
-    # Template as style reference (if available)
     if template_bytes:
-        reference_images.append(
-            types.StyleReferenceImage(
-                referenceImage=types.Image(
-                    imageBytes=template_bytes, mimeType="image/png"
-                ),
-                referenceId=1,
-                config=types.StyleReferenceConfig(
-                    styleDescription="fantasy battle card template with decorative frame",
-                ),
-            )
+        parts.append(types.Part.from_bytes(data=template_bytes, mime_type="image/png"))
+
+    parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+
+    if template_bytes:
+        prompt = (
+            f"The first image is a battle card template (background frame).\n"
+            f"The second image is a person's photo.\n\n"
+            f"While preserving the template card's frame, decorations, and background design, "
+            f"arrange the person's photo in a battle card style.\n\n"
+            f"{theme}\n\n"
+            f"[Required Rules]\n"
+            f"- Keep the template card frame, decorations, background design, and the name input space at the bottom\n"
+            f"- Change the outfit and hairstyle to match the battle card theme\n"
+            f"- Keep the face photorealistic — do NOT convert to illustration or cartoon style. Process based on the original photo\n"
+            f"- Do NOT change the face or body angle, scale, or proportions when editing\n"
+            f"- Do NOT output any text, Japanese or English characters\n"
+            f"- Adjust brightness for optimal inkjet printing — avoid crushed or overly dark colors, use vivid and high-contrast neon colors\n\n"
+            f"[Output Specifications]\n"
+            f"- Print size: 63mm x 88mm\n"
+            f"- Resolution: 600 DPI\n"
+            f"- Required pixels: 1488 x 2079 pixels\n"
+            f"- Do NOT include status display or name display\n"
+        )
+    else:
+        prompt = (
+            f"Transform the attached person's photo into a battle card style.\n"
+            f"{theme}\n\n"
+            f"[Required Rules]\n"
+            f"- Change the outfit and hairstyle to match the battle card theme\n"
+            f"- Keep the face photorealistic — do NOT convert to illustration or cartoon style. Process based on the original photo\n"
+            f"- Keep consistent face and body size. Keep consistent top/bottom/left/right balance when positioning the person\n"
+            f"- Keep consistent card layout, size, and atmosphere across all cards\n"
+            f"- Do NOT output any text, Japanese or English characters\n"
+            f"- Adjust brightness for optimal inkjet printing — avoid crushed or overly dark colors, use vivid and high-contrast neon colors\n\n"
+            f"[Output Specifications]\n"
+            f"- Print size: 63mm x 88mm\n"
+            f"- Resolution: 600 DPI\n"
+            f"- Required pixels: 1488 x 2079 pixels\n"
+            f"- Do NOT include status display or name display\n"
         )
 
-    # Build prompt
-    prompt = (
-        f"Generate a fantasy battle card featuring the person from the reference photo.\n"
-        f"{theme}\n\n"
-        f"[Required Rules]\n"
-        f"- The person must be the central figure on the card\n"
-        f"- Change the outfit and hairstyle to match the battle card theme\n"
-        f"- Keep the face photorealistic — do NOT convert to illustration or cartoon style\n"
-        f"- Do NOT output any text, numbers, or characters on the card\n"
-        f"- Use vivid and high-contrast colors suitable for inkjet printing\n"
-        f"- Portrait orientation battle card\n"
-    )
+    parts.append(types.Part.from_text(text=prompt))
 
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
-            response = client.models.edit_image(
+            response = client.models.generate_content(
                 model=model,
-                prompt=prompt,
-                reference_images=reference_images,
-                config=types.EditImageConfig(
-                    numberOfImages=1,
-                    safetyFilterLevel=types.SafetyFilterLevel.BLOCK_ONLY_HIGH,
-                    personGeneration=types.PersonGeneration.ALLOW_ALL,
-                    outputMimeType="image/png",
+                contents=[types.Content(parts=parts)],
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    safety_settings=_SAFETY_SETTINGS,
                 ),
             )
 
+            # Log finish reason
+            finish_reason = None
+            if response.candidates:
+                candidate = response.candidates[0]
+                finish_reason = getattr(candidate, "finish_reason", None)
+                safety_ratings = getattr(candidate, "safety_ratings", None)
+                if finish_reason:
+                    print(f"[VERTEX] カード {card_index}: finish_reason={finish_reason} ({model})")
+                if safety_ratings:
+                    print(f"[VERTEX] カード {card_index}: safety_ratings={safety_ratings} ({model})")
+
+            # Check for safety block
+            if finish_reason and finish_reason in _SAFETY_FINISH_REASONS:
+                print(
+                    f"[VERTEX] カード {card_index}: SAFETY BLOCKED ({finish_reason}) "
+                    f"(attempt {attempt}/{max_attempts})"
+                )
+                if attempt < max_attempts:
+                    time.sleep(2)
+                    continue
+                return None
+
             # Extract image from response
-            if response.generated_images:
-                gen_img = response.generated_images[0]
+            candidate_content = response.candidates[0].content if response.candidates else None
+            if candidate_content and candidate_content.parts:
+                for part in candidate_content.parts:
+                    if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                        print(f"[VERTEX] 生成成功: カード {card_index} / {total_cards} ({model})")
+                        data = part.inline_data.data
+                        return base64.b64decode(data) if isinstance(data, str) else data
 
-                # Check for safety filter
-                if gen_img.rai_filtered_reason:
-                    print(
-                        f"[IMAGEN] カード {card_index}: RAI filtered: "
-                        f"{gen_img.rai_filtered_reason} (attempt {attempt}/{max_attempts})"
-                    )
-                    if attempt < max_attempts:
-                        time.sleep(2)
-                        continue
-                    return None
-
-                img_data = gen_img.image
-                if img_data and img_data.image_bytes:
-                    print(
-                        f"[IMAGEN] 生成成功: カード {card_index} / {total_cards} ({model})"
-                    )
-                    return img_data.image_bytes
-
-            # No image in response
-            print(
-                f"[IMAGEN] カード {card_index}: レスポンスに画像なし "
-                f"(attempt {attempt}/{max_attempts})"
-            )
             if attempt < max_attempts:
+                print(
+                    f"[VERTEX] カード {card_index}: レスポンスに画像なし "
+                    f"(finish_reason={finish_reason}), リトライ (attempt {attempt}/{max_attempts})"
+                )
                 time.sleep(2)
                 continue
+            print(
+                f"[VERTEX] カード {card_index}: レスポンスに画像なし "
+                f"(finish_reason={finish_reason}), 最終失敗"
+            )
+
+        except ServerError as e:
+            if attempt < max_attempts:
+                print(f"[VERTEX] カード {card_index}: ServerError ({e}), リトライ (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+            print(f"[VERTEX] カード {card_index}: ServerError 最終失敗: {e}")
+
+        except TypeError as e:
+            if attempt < max_attempts:
+                print(f"[VERTEX] カード {card_index}: TypeError ({e}), リトライ (attempt {attempt}/{max_attempts})")
+                time.sleep(2)
+                continue
+            print(f"[VERTEX] カード {card_index}: TypeError 最終失敗: {e}")
 
         except Exception as e:
-            print(
-                f"[IMAGEN] カード {card_index}: エラー ({e}) "
-                f"(attempt {attempt}/{max_attempts})"
-            )
             if attempt < max_attempts:
+                print(f"[VERTEX] カード {card_index}: エラー ({e}), リトライ (attempt {attempt}/{max_attempts})")
                 time.sleep(2)
                 continue
+            print(f"[VERTEX] カード {card_index}: エラー 最終失敗: {e}")
 
     return None
