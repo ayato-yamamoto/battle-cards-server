@@ -5,10 +5,12 @@ from person photos. Requires a GCP service account with Vertex AI
 permissions and the Imagen API enabled.
 
 Configuration (environment variables):
-    GOOGLE_APPLICATION_CREDENTIALS — path to service account JSON key.
-    GCP_PROJECT_ID                 — GCP project ID (auto-read from SA key if unset).
-    GCP_LOCATION                   — Vertex AI region (default: us-central1).
-    IMAGEN_MODEL                   — Imagen model for editing (default: imagen-3.0-capability-001).
+    IMAGEN_CREDENTIALS — path to Imagen service account JSON key
+                         (falls back to GOOGLE_APPLICATION_CREDENTIALS,
+                          then credentials/imagen-sa.json).
+    GCP_PROJECT_ID     — GCP project ID (auto-read from SA key if unset).
+    GCP_LOCATION       — Vertex AI region (default: us-central1).
+    IMAGEN_MODEL       — Imagen model for editing (default: imagen-3.0-capability-001).
 """
 
 import json
@@ -36,10 +38,16 @@ CARD_THEMES = [
 
 
 def _get_credentials_path() -> str | None:
-    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if path:
-        return path
-    default = Path("credentials") / "gcp-vision-sa.json"
+    """Resolve Imagen service account key path.
+
+    Priority: IMAGEN_CREDENTIALS env → GOOGLE_APPLICATION_CREDENTIALS env
+              → credentials/imagen-sa.json default file.
+    """
+    for env_var in ("IMAGEN_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"):
+        path = os.environ.get(env_var)
+        if path and os.path.exists(path):
+            return path
+    default = Path("credentials") / "imagen-sa.json"
     return str(default) if default.exists() else None
 
 
@@ -62,7 +70,22 @@ def get_vertex_client() -> genai.Client:
             "GCP_PROJECT_ID is not set and cannot be read from service account credentials"
         )
     location = os.environ.get("GCP_LOCATION", "us-central1")
-    return genai.Client(vertexai=True, project=project_id, location=location)
+
+    creds_path = _get_credentials_path()
+    credentials = None
+    if creds_path:
+        from google.oauth2 import service_account as sa
+        credentials = sa.Credentials.from_service_account_file(
+            creds_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
+    return genai.Client(
+        vertexai=True,
+        project=project_id,
+        location=location,
+        credentials=credentials,
+    )
 
 
 def generate_battle_card_imagen(
