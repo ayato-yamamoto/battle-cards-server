@@ -8,7 +8,7 @@ Configuration (environment variables):
                          (falls back to GOOGLE_APPLICATION_CREDENTIALS,
                           then credentials/imagen-sa.json).
     GCP_PROJECT_ID     — GCP project ID (auto-read from SA key if unset).
-    GCP_LOCATION       — Vertex AI region (default: us-central1).
+    GCP_LOCATION       — Vertex AI region (default: global).
     VERTEX_MODEL       — model name (default: gemini-3.1-flash-image).
 """
 
@@ -94,7 +94,7 @@ def get_vertex_client() -> genai.Client:
         raise RuntimeError(
             "GCP_PROJECT_ID is not set and cannot be read from service account credentials"
         )
-    location = os.environ.get("GCP_LOCATION", "us-central1")
+    location = os.environ.get("GCP_LOCATION", "global")
 
     creds_path = _get_credentials_path()
     credentials = None
