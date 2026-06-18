@@ -191,7 +191,7 @@ def generate_battle_card_imagen(
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[types.Content(parts=parts)],
+                contents=[types.Content(role="user", parts=parts)],
                 config=types.GenerateContentConfig(
                     response_modalities=["TEXT", "IMAGE"],
                     safety_settings=_SAFETY_SETTINGS,
