@@ -348,19 +348,20 @@ async def _run_generation(
     ad_store_name: str = "",
     ad_company_name: str = "",
 ) -> None:
-    """Background task: generate 6 battle card images sequentially with delay."""
+    """Background task: generate 6 battle card images with staggered launch."""
     total_cards = 6
     generated_dir = os.path.join(UPLOAD_DIR, "generated")
     os.makedirs(generated_dir, exist_ok=True)
 
-    # Interval (seconds) between API requests to avoid 429 RESOURCE_EXHAUSTED
-    REQUEST_INTERVAL_SEC = 5
+    # Interval (seconds) between launching each request (staggered start)
+    STAGGER_INTERVAL_SEC = 3
 
     try:
-        completed = 0
+        # Launch all tasks with staggered delays (don't wait for completion)
+        tasks: list[asyncio.Task] = []
         for card_idx in range(1, total_cards + 1):
-            try:
-                await _generate_single_card(
+            task = asyncio.create_task(
+                _generate_single_card(
                     job_id=job_id,
                     card_idx=card_idx,
                     total_cards=total_cards,
@@ -375,16 +376,23 @@ async def _run_generation(
                     ad_store_name=ad_store_name,
                     ad_company_name=ad_company_name,
                 )
+            )
+            tasks.append(task)
+            # Wait before launching next request (stagger)
+            if card_idx < total_cards:
+                await asyncio.sleep(STAGGER_INTERVAL_SEC)
+
+        # Wait for all tasks to complete, updating progress as each finishes
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+            try:
+                await coro
             except Exception as e:
-                print(f"Card generation error for job {job_id} card {card_idx}: {e}")
+                print(f"Card generation error for job {job_id}: {e}")
             completed += 1
             progress = int(completed / total_cards * 100)
             with get_db() as db:
                 db.execute("UPDATE jobs SET progress = ? WHERE id = ?", (progress, job_id))
-
-            # Wait between AI-generated cards to avoid rate limiting
-            if card_idx < total_cards:
-                await asyncio.sleep(REQUEST_INTERVAL_SEC)
 
         # Count successful generations
         with get_db() as db:
