@@ -7,7 +7,8 @@ Configuration (environment variables):
     GOOGLE_APPLICATION_CREDENTIALS — path to service account JSON key.
     GDRIVE_FOLDER_ID              — target Google Drive folder ID.
 
-The service account's email must have Editor access on the target folder.
+The service account's email must have Content Manager (or higher) access
+on the target shared drive.
 """
 
 import logging
@@ -20,7 +21,7 @@ from googleapiclient.http import MediaFileUpload
 
 logger = logging.getLogger("uvicorn.error")
 
-_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
 def _get_credentials_path() -> str | None:
@@ -71,6 +72,7 @@ def upload_to_drive(local_path: str, filename: str) -> str | None:
             body=file_metadata,
             media_body=media,
             fields="id",
+            supportsAllDrives=True,
         ).execute()
 
         file_id = file.get("id")
