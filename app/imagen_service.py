@@ -9,7 +9,7 @@ Configuration (environment variables):
                           then credentials/imagen-sa.json).
     GCP_PROJECT_ID     — GCP project ID (auto-read from SA key if unset).
     GCP_LOCATION       — Vertex AI region (default: global).
-    VERTEX_MODEL       — model name (default: gemini-3.1-flash-image).
+    VERTEX_MODEL       — model name (default: gemini-3-pro-image).
 """
 
 import base64
@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-3.1-flash-image")
+VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-3-pro-image")
 
 CARD_THEMES = [
     "(Fire) Theme: orange and red flames with burning embers and sparks",
