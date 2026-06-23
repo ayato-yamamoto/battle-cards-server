@@ -354,7 +354,7 @@ async def _run_generation(
     os.makedirs(generated_dir, exist_ok=True)
 
     # Interval (seconds) between launching each request (staggered start)
-    STAGGER_INTERVAL_SEC = 3
+    STAGGER_INTERVAL_SEC = 6
 
     try:
         # Launch all tasks with staggered delays (don't wait for completion)
