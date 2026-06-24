@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .database import SHEETS_DIR, UPLOAD_DIR, get_db, init_db
 from .drive_service import upload_to_drive
+from .google_photos_service import upload_to_google_photos
 from .gemini_service import generate_battle_card
 from .imagen_service import generate_battle_card_imagen
 from .image_processing import apply_text_overlay, generate_ad_card, generate_card_sheet, get_template_bytes
@@ -432,6 +433,16 @@ async def _drive_upload_bg(sheet_path: str, filename: str) -> None:
         logger.warning("[FINALIZE] Drive upload failed (non-fatal): %s", e)
 
 
+async def _photos_upload_bg(sheet_path: str, description: str) -> None:
+    """Upload card sheet to Google Photos in background (non-fatal)."""
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, upload_to_google_photos, sheet_path, description,
+        )
+    except Exception as e:
+        logger.warning("[FINALIZE] Google Photos upload failed (non-fatal): %s", e)
+
+
 # ---------------------------------------------------------------------
 # 4. GET /api/status
 # ---------------------------------------------------------------------
@@ -704,6 +715,10 @@ async def finalize(req: FinalizeRequest):
                 # Upload to Google Drive in background (fire-and-forget)
                 asyncio.create_task(
                     _drive_upload_bg(sheet_path, f"{req.job_id}_sheet.jpg")
+                )
+                # Upload to Google Photos in background (fire-and-forget)
+                asyncio.create_task(
+                    _photos_upload_bg(sheet_path, f"Battle Cards Sheet {req.job_id}")
                 )
         except Exception as e:
             logger.warning("[FINALIZE] Card sheet generation failed (non-fatal): %s", e)
