@@ -87,8 +87,15 @@ def _get_gcp_project_id() -> str | None:
     return None
 
 
+_vertex_client: genai.Client | None = None
+
+
 def get_vertex_client() -> genai.Client:
-    """Create a genai Client configured for Vertex AI."""
+    """Return a shared genai Client configured for Vertex AI (singleton)."""
+    global _vertex_client
+    if _vertex_client is not None:
+        return _vertex_client
+
     project_id = _get_gcp_project_id()
     if not project_id:
         raise RuntimeError(
@@ -105,12 +112,13 @@ def get_vertex_client() -> genai.Client:
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
 
-    return genai.Client(
+    _vertex_client = genai.Client(
         vertexai=True,
         project=project_id,
         location=location,
         credentials=credentials,
     )
+    return _vertex_client
 
 
 def generate_battle_card_imagen(
